@@ -9,7 +9,7 @@ from src.scraper import rodar_scraper_multithread
 from src.database import LeadDatabase
 
 def menu_interativo():
-    print("=== 🗺️  MAP SCRAPER PRO - V3 ===")
+    print("=== MAP SCRAPER ===")
     
     df_estados = obter_estados()
     if df_estados.empty: return

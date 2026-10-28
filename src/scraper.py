@@ -128,8 +128,8 @@ def rodar_scraper_multithread(nicho, cidade, uf, termos_lista, mostrar_navegador
                 leads_bairro = futuro.result()
                 with lock:
                     todos_leads.extend(leads_bairro)
-                print(f"✅ [{termo}] Finalizado.")
+                print(f"[{termo}] Finalizado.")
             except Exception as e:
-                print(f"❌ Erro na busca {termo}: {e}")
+                print(f"Erro na busca {termo}: {e}")
                 
     return pd.DataFrame(todos_leads)
