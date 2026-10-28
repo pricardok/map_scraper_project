@@ -1,0 +1,9 @@
+pandas
+openpyxl
+instagpy
+pip-system-certs
+playwright
+chromium
+geopy
+duckdb
+requests

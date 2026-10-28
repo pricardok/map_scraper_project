@@ -1,0 +1,25 @@
+# Arquivos de dados e saídas geradas (NÃO subir para o Git)
+data/
+output/
+*.duckdb
+*.xlsx
+*.csv
+*.log
+
+# Ambientes Virtuais
+venv/
+env/
+.venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Configurações de IDE
+.vscode/
+.idea/
+
+# Sistema Operacional
+.DS_Store
+Thumbs.db
