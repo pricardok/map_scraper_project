@@ -1,5 +1,5 @@
 # Arquivos de dados e saídas geradas (NÃO subir para o Git)
-data/
+#data/
 output/
 *.duckdb
 *.xlsx
