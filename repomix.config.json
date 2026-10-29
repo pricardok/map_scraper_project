@@ -16,15 +16,15 @@
     "removeEmptyLines": false,
     "compress": false,
     "topFilesLength": 5,
-    "showLineNumbers": false,
+    "showLineNumbers": true,
     "truncateBase64": false,
     "copyToClipboard": false,
-    "includeFullDirectoryStructure": false,
-    "tokenCountTree": false,
+    "includeFullDirectoryStructure": true,
+    "tokenCountTree": true,
     "git": {
       "sortByChanges": true,
       "sortByChangesMaxCommits": 100,
-      "includeDiffs": false,
+      "includeDiffs": true,
       "includeLogs": false,
       "includeLogsCount": 50
     }

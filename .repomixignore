@@ -2,3 +2,11 @@
 # Example:
 # *.log
 # tmp/
+
+# Ignorar lixos de teste
+output/
+util/
+
+# Ignorar arquivos gerados pelo próprio Repomix
+repomix-output.md
+repomix-output.xml

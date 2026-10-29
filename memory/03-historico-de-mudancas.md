@@ -107,7 +107,7 @@ Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
 
 | Item | Status |
 |---|---|
-| Bairros oficiais via CNEFE 2022 | **Não implementar por ora** (decisão do mantenedor) |
+| Bairros oficiais via CNEFE 2022 | **Não implementar por hora** (decisão do mantenedor) |
 | Resolução automática de captcha (2Captcha/CapMonster) | Não implementado; hoje pausa e desiste da área |
 | Enriquecimento de e-mail a partir dos sites | Não iniciado |
 | Base de bairros offline nacional | Coberto parcialmente pelo IBGE (643 cidades) |
