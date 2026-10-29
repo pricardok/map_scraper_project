@@ -10,9 +10,17 @@ Documentação do Projeto: MAP SCRAPER
 
     A ferramenta foi construída com uma arquitetura modular e conta com os seguintes recursos:
 
-        - Busca Dinâmica de Localidades: Integração com a API do IBGE para listar Estados e Cidades, e uso do Geopy (OpenStreetMap) como fallback para buscar bairros. Se o bairro não for encontrado, ele agrupa como "Geral" (buscando a cidade inteira).
+        - Busca Dinâmica de Localidades: Integração com a API do IBGE para listar Estados e Cidades, e uso do Nominatim + Overpass (OpenStreetMap) para descobrir os bairros da cidade. Se nenhum bairro for encontrado, ele faz fallback buscando a cidade inteira.
 
         - Scraping em Multithreading: Uso do Playwright com ThreadPoolExecutor para abrir múltiplos navegadores simultaneamente e acelerar a coleta em diferentes bairros.
+
+        - Cobertura por Bairros: A coleta é dividida por bairros para contornar a paginação do Google Maps e capturar mais leads por cidade.
+
+        - Rolagem Dinâmica: A lista de resultados é rolada até esgotar (com limite de segurança), em vez de um número fixo de rolagens.
+
+        - Robustez: Retry com backoff em erros transitórios, deduplicação intra-execução e salvamento incremental no DuckDB a cada área concluída.
+
+        - Anti-bloqueio: User-Agent realista, viewport configurado e pausas aleatórias entre as requisições para reduzir o risco de bloqueio.
 
         - Tratamento de Dados (Data Cleansing):
 
@@ -28,14 +36,17 @@ Documentação do Projeto: MAP SCRAPER
 
         - Exportação para Excel: Gera um relatório limpo e ordenado apenas com os leads ativos.
 
+        - Envio de WhatsApp (WAHA): Envia mensagens para os leads via WAHA (WhatsApp HTTP API). Só envia para leads ativos do tipo Celular (nunca fixo) e ainda não enviados, com intervalo configurável entre disparos para evitar spam. Cada envio é registrado em `status_whatsapp` e `data_envio_whatsapp`.
+
 3. Stack Tecnológica
 
     - Linguagem: Python 3.10+
     - Scraping: Playwright (Chromium)
     - Banco de Dados: DuckDB
     - Manipulação de Dados: Pandas
-    - APIs: IBGE (Localidades) e Nominatim/Geopy (Bairros)
+    - APIs: IBGE (Localidades), Nominatim e Overpass (Bairros)
     - Tratamento: Regex (para telefones)
+    - WhatsApp: WAHA (WhatsApp HTTP API)
 
 4. Estrutura de Pastas
 
@@ -46,10 +57,11 @@ Documentação do Projeto: MAP SCRAPER
     │
     ├── src/                   # Código-fonte
     │   ├── __init__.py        
-    │   ├── database.py        # Lógica do DuckDB (UPSERT, status, exportação)
-    │   ├── locations.py       # Integração com IBGE e Geopy
+    │   ├── database.py        # Lógica do DuckDB (UPSERT, status, exportação, log de envio)
+    │   ├── locations.py       # Integração com IBGE, Nominatim e Overpass
     │   ├── scraper.py         # Robô Playwright e multithreading
     │   ├── utils.py           # Formatação de telefone (Fixo/Celular)
+    │   ├── whatsapp.py        # Envio via WAHA (WhatsApp HTTP API)
     │   └── main.py            # Menu interativo e orquestração
     │
     ├── requirements.txt       # Dependências do projeto
@@ -60,6 +72,8 @@ Documentação do Projeto: MAP SCRAPER
     Passo 1: Instalação
     No terminal, dentro da pasta raiz do projeto, instale as dependências e o navegador do Playwright:
 
+    python -m venv venv
+    .\venv\Scripts\Activate
     python -m pip install -r requirements.txt
     python -m playwright install chromium
     Passo 2: Execução
@@ -67,13 +81,11 @@ Documentação do Projeto: MAP SCRAPER
 
     python src/main.py
     Passo 3: Interação no Terminal
-    O script fará 5 perguntas simples:
+    O menu tem 3 opções:
 
-    UF do estado: Digite a sigla (ex: RS, SP, RJ).
-    Cidade: Digite o nome (ex: Porto Alegre). Se houver mais de uma, ele pedirá para especificar.
-    Nicho: Digite o que quer buscar (ex: barbearia, salao de beleza).
-    Bairros: O robô buscará automaticamente. (Se não achar, ele usará Geral).
-    Ver o navegador? Digite S se quiser ver o robô trabalhando na tela, ou N para rodar em segundo plano (mais rápido).
+    1 - Coletar leads: faz 5 perguntas simples (UF, Cidade, Nicho, Bairros automáticos, Ver navegador).
+    2 - Enviar mensagens WhatsApp: envia para os leads celulares pendentes (ver seção 7).
+    3 - Sair.
 
     Passo 4: Resultados
 
@@ -94,14 +106,54 @@ Documentação do Projeto: MAP SCRAPER
     UPDATE leads SET status = 'ativo' WHERE nome = 'Nome da Barbearia';
     Nota: A regra do UPSERT no database.py garante que, se o robô achar uma barbearia "descartada", ele pula ela e não sobrescreve seus dados no banco.
 
+7. Envio de WhatsApp (WAHA)
 
-7. Próximos Passos (Melhorias Futuras)
+    Pré-requisito: uma instância WAHA rodando com um número conectado via QR Code.
 
-    Para escalar ainda mais este projeto, os próximos passos sugeridos são:
+    Configuração (arquivo .env na raiz do projeto):
+    Copie .env.example para .env e preencha os valores.
 
-    Base de Bairros Offline: Baixar o dataset do Kaggle (bairros do Brasil) e jogar no DuckDB para não depender da API do Geopy (que limita a busca a 1 bairro por vez).
+    ```
+    WAHA_API_URL=http://localhost:3000
+    WAHA_API_KEY=SUA_CHAVE_AQUI
+    WAHA_SESSION=default
+    WAHA_ATIVO=true
+    SOMENTE_ENVIO=false
+    WAHA_INTERVALO=13
+    WAHA_LIMITE=
+    ```
 
-    Captcha Handling: Implementar um serviço ou lógica de pausa para evitar bloqueios do Google Maps em coletas muito grandes.
+    Flags de comportamento:
+    - WAHA_ATIVO: se false, desliga o envio de WhatsApp (não tenta enviar).
+    - SOMENTE_ENVIO: se true, pula a coleta e vai direto para o envio
+      (equivalente a rodar `python src/main.py --so-enviar`).
+    - WAHA_LIMITE: quantidade máxima de leads por campanha (vazio = sem limite).
 
-    Enriquecimento de E-mail: Criar um script secundário que lê os sites encontrados e busca e-mails de contato (usando Regex).
+    Regras de envio (evita spam):
+    - Só envia para leads com status = 'ativo'.
+    - Só envia para tipo_telefone = 'Celular' (fixos são ignorados).
+    - Só envia para leads ainda não enviados (status_whatsapp = 'pendente' ou NULL).
+    - Intervalo de WAHA_INTERVALO segundos entre envios.
+
+    Logs no banco:
+    - status_whatsapp: 'pendente', 'enviado' ou 'falhou'.
+    - data_envio_whatsapp: gravada apenas quando o envio é bem-sucedido.
+
+    A mensagem pode usar as variáveis {nome}, {bairro} e {cidade}.
+
+8. Próximos Passos (Melhorias Futuras)
+
+    Já implementado:
+    - Cobertura por bairros (Nominatim + Overpass) com fallback para a cidade inteira.
+    - Rolagem dinâmica dos resultados do Google Maps.
+    - Retry, deduplicação intra-execução e salvamento incremental.
+    - Medidas anti-bloqueio (user-agent, viewport e pausas aleatórias).
+    - Envio de WhatsApp via WAHA com log de envio (só celulares, sem spam).
+
+    Pendências sugeridas:
+    - Base de Bairros Offline: Baixar o dataset do Kaggle (bairros do Brasil) e jogar no DuckDB para não depender das APIs do OpenStreetMap (Nominatim/Overpass).
+
+    - Captcha Handling: Implementar um serviço de resolução ou lógica de pausa mais longa para evitar bloqueios do Google Maps em coletas muito grandes.
+
+    - Enriquecimento de E-mail: Criar um script secundário que lê os sites encontrados e busca e-mails de contato (usando Regex).
 

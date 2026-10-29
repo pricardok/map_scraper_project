@@ -6,6 +6,12 @@
 *.csv
 *.log
 
+# Segredos e configuração local (contém a API key da WAHA)
+.env
+
+# Sessões do WhatsApp (WAHA)
+sessions/
+
 # Ambientes Virtuais
 venv/
 env/

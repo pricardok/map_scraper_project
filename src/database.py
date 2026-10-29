@@ -10,6 +10,7 @@ class LeadDatabase:
         self.db_path = db_path
         self.conn = duckdb.connect(self.db_path)
         self._create_table()
+        self._ensure_whatsapp_columns()
 
     def _create_table(self):
         self.conn.execute("""
@@ -17,7 +18,7 @@ class LeadDatabase:
                 nome VARCHAR,
                 telefone VARCHAR,
                 tipo_telefone VARCHAR,
-                whatsapp_link VARCHAR, -- NOVA COLUNA
+                whatsapp_link VARCHAR,
                 instagram VARCHAR,
                 site VARCHAR,
                 bairro VARCHAR,
@@ -26,9 +27,19 @@ class LeadDatabase:
                 nicho VARCHAR,
                 status VARCHAR DEFAULT 'ativo',
                 data_extracao TIMESTAMP,
+                data_envio_whatsapp TIMESTAMP,
+                status_whatsapp VARCHAR DEFAULT 'pendente',
                 PRIMARY KEY (nome, cidade)
             )
         """)
+
+    def _ensure_whatsapp_columns(self):
+        """Adiciona as colunas de log de WhatsApp em bancos criados antes da migração."""
+        colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
+        if 'data_envio_whatsapp' not in colunas:
+            self.conn.execute("ALTER TABLE leads ADD COLUMN data_envio_whatsapp TIMESTAMP")
+        if 'status_whatsapp' not in colunas:
+            self.conn.execute("ALTER TABLE leads ADD COLUMN status_whatsapp VARCHAR DEFAULT 'pendente'")
 
     def save_leads(self, df: pd.DataFrame):
         if df.empty:
@@ -49,16 +60,56 @@ class LeadDatabase:
             df['status'] = 'ativo'
 
         self.conn.register('df_temp', df)
-        
-        # Atualizado para incluir whatsapp_link
+
+        # UPSERT preservando o status atual e as colunas de log do WhatsApp.
+        # Assim, re-raspar um lead já enviado NÃO apaga data_envio_whatsapp/status_whatsapp.
         self.conn.execute("""
-            INSERT OR REPLACE INTO leads (nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao)
+            INSERT INTO leads (nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao)
             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao
             FROM df_temp
+            ON CONFLICT (nome, cidade) DO UPDATE SET
+                telefone = excluded.telefone,
+                tipo_telefone = excluded.tipo_telefone,
+                whatsapp_link = excluded.whatsapp_link,
+                instagram = excluded.instagram,
+                site = excluded.site,
+                bairro = excluded.bairro,
+                estado = excluded.estado,
+                nicho = excluded.nicho,
+                data_extracao = excluded.data_extracao
         """)
-        
+
         self.conn.unregister('df_temp')
         return len(df)
+
+    def get_leads_para_envio(self, limite=None):
+        """Retorna leads ativos, celulares e ainda não enviados (evita spam/fixo)."""
+        query = """
+            SELECT nome, telefone, whatsapp_link, bairro, cidade, estado, nicho
+            FROM leads
+            WHERE status = 'ativo'
+              AND tipo_telefone = 'Celular'
+              AND (status_whatsapp IS NULL OR status_whatsapp = 'pendente')
+            ORDER BY cidade, bairro, nome
+        """
+        if limite:
+            query += f" LIMIT {int(limite)}"
+        return self.conn.execute(query).df()
+
+    def marcar_envio(self, nome, cidade, status_whatsapp):
+        """Registra o resultado do envio. 'data_envio_whatsapp' é gravado apenas no sucesso."""
+        if status_whatsapp == 'enviado':
+            self.conn.execute("""
+                UPDATE leads
+                SET status_whatsapp = ?, data_envio_whatsapp = ?
+                WHERE nome = ? AND cidade = ?
+            """, [status_whatsapp, datetime.now(), nome, cidade])
+        else:
+            self.conn.execute("""
+                UPDATE leads
+                SET status_whatsapp = ?
+                WHERE nome = ? AND cidade = ?
+            """, [status_whatsapp, nome, cidade])
 
     def export_to_excel(self, nicho: str, cidade: str):
         df = self.conn.execute("""
