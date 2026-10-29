@@ -1,7 +1,7 @@
-# Arquivos de dados e saídas geradas (NÃO subir para o Git)
-# data/
-# output/
-# *.duckdb
+# Dados: o banco DuckDB É versionado (data/leads.duckdb).
+# Apenas artefatos transientes do DuckDB e saídas geradas ficam de fora.
+*.duckdb.wal
+*.duckdb.tmp
 *.xlsx
 *.csv
 *.log

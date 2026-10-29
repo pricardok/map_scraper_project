@@ -125,3 +125,7 @@ def menu_interativo():
             break
         else:
             print("Opção inválida.")
+
+
+if __name__ == "__main__":
+    menu_interativo()
