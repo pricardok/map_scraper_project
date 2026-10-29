@@ -10,7 +10,10 @@ Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
 
 - Criada a pasta `memory/` com documentação densa para reduzir custo de contexto.
 - Arquivos: `README.md`, `00-resumo-projeto.md`, `01-arquitetura-e-modulos.md`,
-  `02-decisoes-e-armadilhas.md`, este `03-historico-de-mudancas.md`.
+  `02-decisoes-e-armadilhas.md`, `03-historico-de-mudancas.md`,
+  `04-como-contribuir.md` (padrões de código, logs, config, testes e docs).
+- `README.md` limpo: removido o bloco "env temp:" (dump cru do `.env`) e
+  adicionadas as seções 12 (memória para IA) e 13 (observação sobre configuração).
 
 ### Correção: cache de bairros ignorado (`bairros_fonte`)
 

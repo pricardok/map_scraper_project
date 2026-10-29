@@ -5,7 +5,7 @@ escrita para ser lida por modelos de IA antes de alterar código.
 
 ## Por que existe
 
-Ler 4 arquivos curtos daqui custa muito menos tokens do que reler todo o código.
+Ler esses arquivos curtos daqui custa muito menos tokens do que reler todo o código.
 Use esta pasta como **primeira fonte de contexto**.
 
 ## Ordem de leitura recomendada
@@ -16,6 +16,7 @@ Use esta pasta como **primeira fonte de contexto**.
 | 2 | [01-arquitetura-e-modulos.md](./01-arquitetura-e-modulos.md) | Cada módulo, funções principais, fluxos |
 | 3 | [02-decisoes-e-armadilhas.md](./02-decisoes-e-armadilhas.md) | Decisões técnicas, bugs conhecidos, cuidados |
 | 4 | [03-historico-de-mudancas.md](./03-historico-de-mudancas.md) | O que mudou recentemente e por quê |
+| 5 | [04-como-contribuir.md](./04-como-contribuir.md) | Padrões de código, logs, config, testes e documentação |
 
 ## Regras de manutenção
 

@@ -315,6 +315,7 @@ Documentação do Projeto: MAP SCRAPER
     2. memory/01-arquitetura-e-modulos.md -> módulos, funções e fluxos
     3. memory/02-decisoes-e-armadilhas.md -> decisões, bugs conhecidos, cuidados
     4. memory/03-historico-de-mudancas.md -> o que mudou e o que ficou pendente
+    5. memory/04-como-contribuir.md       -> padrões de código, logs, testes e docs
 
     Regras: manter os arquivos curtos, registrar o "porquê" das decisões e nunca
     colocar segredos ali (API keys ficam apenas no `.env`).
