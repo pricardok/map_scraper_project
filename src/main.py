@@ -4,7 +4,12 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.locations import obter_estados, obter_cidades, obter_termos_busca
+from src.locations import (
+    obter_estados,
+    obter_cidades,
+    obter_termos_busca,
+    sincronizar_base_localidades,
+)
 from src.scraper import rodar_scraper_multithread
 from src.database import LeadDatabase
 from src.whatsapp import (
@@ -113,7 +118,8 @@ def menu_interativo():
         print("\n=== MAP SCRAPER ===")
         print("1 - Coletar leads")
         print("2 - Enviar mensagens WhatsApp")
-        print("3 - Sair")
+        print("3 - Sincronizar base de localidades (IBGE)")
+        print("4 - Sair")
         opcao = input("Escolha uma opção: ").strip()
 
         if opcao == "1":
@@ -121,6 +127,8 @@ def menu_interativo():
         elif opcao == "2":
             enviar_whatsapp_menu()
         elif opcao == "3":
+            sincronizar_base_localidades()
+        elif opcao == "4":
             print("Até mais!")
             break
         else:

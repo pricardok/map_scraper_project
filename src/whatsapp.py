@@ -17,51 +17,19 @@ import time
 
 import requests
 
-_PROJETO_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from src.config import carregar_env, str_para_bool
 
-
-def _str_para_bool(valor, padrao=False):
-    """Converte strings comuns de booleano ('true', '1', 'sim', 's', 'yes') em bool."""
-    if valor is None:
-        return padrao
-    return str(valor).strip().lower() in ("1", "true", "yes", "s", "sim", "on")
-
-
-def _carregar_env(caminho=None):
-    """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
-
-    Não sobrescreve variáveis que já existem no ambiente. Ignora linhas
-    em branco, comentários (#) e valores entre aspas.
-    """
-    if caminho is None:
-        caminho = os.path.join(_PROJETO_RAIZ, ".env")
-
-    if not os.path.isfile(caminho):
-        return
-
-    with open(caminho, "r", encoding="utf-8") as f:
-        for linha in f:
-            linha = linha.strip()
-            if not linha or linha.startswith("#") or "=" not in linha:
-                continue
-            chave, _, valor = linha.partition("=")
-            chave = chave.strip()
-            valor = valor.strip().strip('"').strip("'")
-            if chave and chave not in os.environ:
-                os.environ[chave] = valor
-
-
-_carregar_env()
+carregar_env()
 
 WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
 WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
 WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
 
 # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
-WAHA_ATIVO = _str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
+WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
 
 # Se true, pula a coleta e vai direto para o envio (não coleta nada).
-SOMENTE_ENVIO = _str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
+SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
 
 # Intervalo (segundos) entre envios e limite de leads por campanha.
 # WAHA_LIMITE vazio = sem limite (envia todos os pendentes).
