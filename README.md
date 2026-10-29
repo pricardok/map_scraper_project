@@ -304,3 +304,105 @@ Documentação do Projeto: MAP SCRAPER
     - Enriquecimento de E-mail: Criar um script secundário que lê os sites encontrados e busca e-mails de contato (usando Regex).
 
 
+env temp:
+
+# =============================================================================
+# MAP SCRAPER - configuração LOCAL (este arquivo NÃO vai para o Git)
+# -----------------------------------------------------------------------------
+# Modelo com todos os itens comentados: .env.example
+#
+# REGRAS IMPORTANTES
+#  - Formato: CHAVE=VALOR, uma por linha.
+#  - Comentários (linhas que começam com #) podem ficar à vontade, mas SEMPRE em
+#    linha própria. Não coloque comentário na mesma linha do valor, porque ele
+#    seria lido como parte do valor.
+#  - true/false: também aceita 1/0, sim/não, s/yes/on.
+#  - As variáveis só são lidas na inicialização: reinicie o programa após editar.
+# =============================================================================
+
+
+# =============================================================================
+# WHATSAPP - WAHA (WhatsApp HTTP API)
+# =============================================================================
+
+# URL base da sua instância WAHA. Sem a barra final.
+WAHA_API_URL=http://localhost:3000
+
+# Chave de API da WAHA (WHATSAPP_API_KEY no .env do Docker). Vazio = sem auth.
+WAHA_API_KEY=
+
+# Sessão do WhatsApp já conectada por QR Code (nome que aparece em /api/sessions).
+WAHA_SESSION=default
+
+# Liga/desliga TODO o envio de WhatsApp (não afeta a coleta de leads).
+#   true = menu "2 - Enviar mensagens WhatsApp" funciona
+#   false = o menu avisa que está desativado e não envia nada
+WAHA_ATIVO=true
+
+# Pula o menu e vai direto ao envio, sem coletar.
+#   true = equivale a: python src/main.py --so-enviar
+#   false = abre o menu normal
+SOMENTE_ENVIO=false
+
+# Pausa em SEGUNDOS entre um envio e o próximo (13s ≈ 4-5 msg/min).
+# Pausas curtas aumentam o risco de banimento do número.
+WAHA_INTERVALO=13
+
+# Máximo de leads por campanha. Vazio = sem limite.
+# Só conta leads celulares, ativos e ainda não enviados.
+WAHA_LIMITE=
+
+
+# =============================================================================
+# BASE DE LOCALIDADES (IBGE) - cache em DuckDB: tabelas localidades_*
+# -----------------------------------------------------------------------------
+# As duas flags são independentes:
+#
+#   USAR_CACHE  SALVAR   O que acontece
+#   true        true     usa o banco; só vai à API do que falta e grava (padrão)
+#   false       true     ignora o banco, sempre vai à API e regrava (refresh)
+#   true        false    usa o banco; o que falta vai à API mas NÃO é gravado
+#   false       false    sempre API, e o banco nunca é tocado (somente leitura)
+# =============================================================================
+
+# Consultar a base local ANTES da API do IBGE?
+#   true  = se já está no DuckDB, nem chama a internet (rápido)
+#   false = sempre chama a API do IBGE, mesmo com o dado já gravado
+LOCALIDADES_USAR_CACHE=true
+
+# Permitir GRAVAR na base local?
+#   true  = pode inserir/atualizar (UPSERT) estados, municípios e bairros
+#   false = somente leitura: nada é gravado e nem as tabelas são criadas
+# ATENÇÃO: com false, os menus "3 - Sincronizar" e "4 - Aquecer bairros" ficam
+# desativados.
+LOCALIDADES_SALVAR=true
+
+# Mínimo de distritos do IBGE para considerar a cidade "coberta" pelo IBGE.
+# O IBGE tem distritos (não bairros); abaixo deste número, complementa com OSM.
+# Exemplo: Campinas-SP (7 distritos) usa só o IBGE;
+#          Canoas-RS (1 distrito, a sede) vai para o OpenStreetMap.
+LOCALIDADES_MIN_BAIRROS=3
+
+# Pausa em SEGUNDOS entre cidades no menu "4 - Aquecer bairros de uma UF".
+# Aplicada só quando a cidade precisou do OpenStreetMap (Nominatim: ~1 req/s).
+AQUECER_PAUSA_SEGUNDOS=2
+
+
+# =============================================================================
+# GOOGLE MAPS - captcha / bloqueio ("tráfego incomum")
+# -----------------------------------------------------------------------------
+# Quando o Google bloqueia, o robô pausa e tenta de novo. Persistindo, aborta
+# apenas aquela área e mantém os leads já coletados.
+# =============================================================================
+
+# Tentativas por página antes de desistir da área.
+#   1 = não tenta de novo (só pausa uma vez e desiste)
+#   2 = pausa e tenta mais uma vez (padrão)
+CAPTCHA_MAX_TENTATIVAS=2
+
+# Pausa longa em SEGUNDOS da thread que recebeu o captcha, antes de tentar de novo.
+CAPTCHA_PAUSA_SEGUNDOS=300
+
+# Pausa compartilhada em SEGUNDOS aplicada a TODAS as threads assim que uma
+# delas detecta bloqueio (evita que as outras continuem tentando).
+CAPTCHA_PAUSA_GLOBAL_SEGUNDOS=180

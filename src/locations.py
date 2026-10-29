@@ -380,11 +380,9 @@ def _resolver_municipio(cidade, uf):
                 "id_municipio": item["id_municipio"],
                 "nome": item["nome"],
                 "uf": uf,
-                "bairros_fonte": None,
+                "bairros_fonte": item.get("bairros_fonte"),
             }
 
-    if uf not in _municipios_memoria:
-        print(f"  {cidade}-{uf}: consultando a lista de municípios do IBGE...")
     baixados = _municipios_da_uf(uf) or []
     _salvar(localidades_db.salvar_municipios, baixados)
 

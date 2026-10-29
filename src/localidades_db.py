@@ -119,7 +119,8 @@ def salvar_estados(registros, db_path=None):
 def ler_municipios(uf, db_path=None):
     with conexao(db_path) as con:
         df = _ler(con,
-            "SELECT id_municipio, nome FROM localidades_municipios WHERE uf = ? ORDER BY nome",
+            """SELECT id_municipio, nome, uf, bairros_fonte
+               FROM localidades_municipios WHERE uf = ? ORDER BY nome""",
             [uf],
         ).df()
     return df.to_dict("records")
