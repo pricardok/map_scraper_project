@@ -16,6 +16,7 @@ a lista é complementada com bairros do OpenStreetMap (Nominatim + Overpass).
 """
 import os
 import time
+import unicodedata
 
 import pandas as pd
 import requests
@@ -48,6 +49,10 @@ localidades_db.CRIAR_TABELAS = SALVAR
 # Quantidade mínima de distritos úteis para não precisar do OpenStreetMap.
 # Abaixo disso, a cidade é complementada com bairros do OSM.
 MIN_BAIRROS = max(1, env_int("LOCALIDADES_MIN_BAIRROS", 3))
+
+# Pausa (segundos) entre cidades no aquecimento por UF, aplicada apenas quando o
+# OpenStreetMap foi consultado (política de uso do Nominatim: 1 req/s).
+AQUECER_PAUSA_PADRAO = max(0, env_int("AQUECER_PAUSA_SEGUNDOS", 2))
 
 _avisou_cache_indisponivel = False
 _avisou_sem_gravacao = False
@@ -145,6 +150,20 @@ def _baixar_distritos(id_municipio=None):
             "id_municipio": municipio.get("id"),
         })
     return [r for r in registros if r["id_municipio"] and r["nome"]]
+
+
+_municipios_memoria = {}
+
+
+def _municipios_da_uf(uf):
+    """Lista de municípios da UF, memorizada na execução para não baixar duas vezes."""
+    if uf not in _municipios_memoria:
+        print(f"  Baixando a lista de municípios de {uf} do IBGE...")
+        municipios = _baixar_municipios(uf)
+        if municipios is None:
+            return None
+        _municipios_memoria[uf] = municipios
+    return _municipios_memoria[uf]
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +289,7 @@ def obter_cidades(uf):
             print(f"Base local: {len(municipios)} cidades em {uf}.")
             return [m["nome"] for m in municipios]
 
-    municipios = _baixar_municipios(uf)
+    municipios = _municipios_da_uf(uf)
     if municipios is None:
         municipios = _cache(localidades_db.ler_municipios, uf)
         if municipios:
@@ -283,6 +302,20 @@ def obter_cidades(uf):
     return sorted(m["nome"] for m in municipios)
 
 
+def _normalizar(texto):
+    """Minúsculas e sem acentos, para comparar nomes digitados pelo usuário."""
+    texto = unicodedata.normalize("NFKD", str(texto or ""))
+    return "".join(c for c in texto if not unicodedata.combining(c)).strip().casefold()
+
+
+def filtrar_cidades(cidades, termo):
+    """Filtra a lista de cidades por um trecho, ignorando acentos e maiúsculas."""
+    alvo = _normalizar(termo)
+    if not alvo:
+        return []
+    return [c for c in cidades if alvo in _normalizar(c)]
+
+
 def _descobrir_bairros(cidade, uf, municipio):
     """Monta a lista final de bairros: distritos do IBGE + complemento do OSM.
 
@@ -290,18 +323,28 @@ def _descobrir_bairros(cidade, uf, municipio):
     usado quando houve falha de rede, para tentar de novo na próxima execução.
     """
     registros = []
+    total_distritos = 0
     if municipio:
         distritos = _baixar_distritos(municipio["id_municipio"]) or []
+        total_distritos = len(distritos)
         for distrito in distritos:
-            if distrito["nome"].lower() == cidade.strip().lower():
+            if _normalizar(distrito["nome"]) == _normalizar(cidade):
                 continue
             registros.append({"nome": distrito["nome"], "id_distrito": distrito["id_distrito"]})
 
     if len(registros) >= MIN_BAIRROS:
+        print(f"  IBGE: {len(registros)} distritos de {cidade}-{uf} serão usados como áreas de busca.")
         return registros, localidades_db.FONTE_IBGE
 
-    print(f"  IBGE retornou {len(registros)} distrito(s) útil(eis) para {cidade}-{uf}.")
-    print("  Complementando com bairros do OpenStreetMap...")
+    # A API de Localidades do IBGE só tem distritos/subdistritos — não tem bairros.
+    # Quando o município tem apenas o distrito-sede, não há o que aproveitar.
+    if total_distritos <= 1:
+        print(f"  IBGE não publica bairros para {cidade}-{uf}: o município tem apenas "
+              f"{total_distritos} distrito (a sede).")
+    else:
+        print(f"  IBGE: apenas {len(registros)} distrito(s) além da sede em {cidade}-{uf}.")
+
+    print("  Buscando bairros no OpenStreetMap...")
     bairros_osm = _bairros_via_overpass(cidade, uf)
 
     if bairros_osm is None:
@@ -309,10 +352,10 @@ def _descobrir_bairros(cidade, uf, municipio):
         print("  os distritos do IBGE serão usados apenas nesta execução.")
         return registros, None
 
-    vistos = {r["nome"].lower() for r in registros}
+    vistos = {_normalizar(r["nome"]) for r in registros}
     for nome in bairros_osm:
-        if nome.lower() not in vistos:
-            vistos.add(nome.lower())
+        if _normalizar(nome) not in vistos:
+            vistos.add(_normalizar(nome))
             registros.append({"nome": nome, "id_distrito": None})
 
     if bairros_osm:
@@ -323,32 +366,49 @@ def _descobrir_bairros(cidade, uf, municipio):
 
 
 def _resolver_municipio(cidade, uf):
-    """Descobre o município (id do IBGE) na base local ou na lista da UF.
+    """Descobre o município no IBGE: id e nome oficial.
 
-    A lista da UF é usada em memória, então funciona mesmo com
-    LOCALIDADES_SALVAR=false (quando nada pode ser gravado).
+    Primeiro tenta a base local; se não achar, baixa a lista da UF (e grava, se
+    LOCALIDADES_SALVAR permitir). Retorna None quando o nome não existe na UF.
     """
-    municipio = _cache(localidades_db.buscar_municipio, cidade, uf)
-    if municipio:
-        return municipio
+    alvo = _normalizar(cidade)
 
-    print(f"  {cidade}-{uf} ainda não está na base local. Consultando o IBGE...")
-    municipios = _baixar_municipios(uf)
-    if not municipios:
-        return None
-
-    _salvar(localidades_db.salvar_municipios, municipios)
-
-    alvo = cidade.strip().lower()
+    municipios = _cache(localidades_db.ler_municipios, uf) or []
     for item in municipios:
-        if item["nome"].strip().lower() == alvo:
+        if _normalizar(item["nome"]) == alvo:
+            return {
+                "id_municipio": item["id_municipio"],
+                "nome": item["nome"],
+                "uf": uf,
+                "bairros_fonte": None,
+            }
+
+    if uf not in _municipios_memoria:
+        print(f"  {cidade}-{uf}: consultando a lista de municípios do IBGE...")
+    baixados = _municipios_da_uf(uf) or []
+    _salvar(localidades_db.salvar_municipios, baixados)
+
+    for item in baixados:
+        if _normalizar(item["nome"]) == alvo:
             return {
                 "id_municipio": item["id_municipio"],
                 "nome": item["nome"],
                 "uf": item["uf"],
                 "bairros_fonte": None,
             }
+
+    if mun := _cache(localidades_db.buscar_municipio, cidade, uf):
+        return mun
     return None
+
+
+def obter_municipio(cidade, uf):
+    """Retorna o município do IBGE para o nome digitado (id, nome oficial e uf).
+
+    Útil para gravar sempre o nome oficial, mesmo que o usuário digite sem
+    acento ou em minúsculas (ex.: "canoas" -> "Canoas").
+    """
+    return _resolver_municipio(cidade, uf)
 
 
 def obter_bairros(cidade, uf):
@@ -358,18 +418,21 @@ def obter_bairros(cidade, uf):
     """
     municipio = _resolver_municipio(cidade, uf)
 
+    # Nome oficial do IBGE: evita divergência de acento/caixa nas buscas.
+    nome_oficial = municipio["nome"] if municipio else cidade
+
     if USAR_CACHE and municipio and municipio.get("bairros_fonte"):
         bairros = _cache(localidades_db.ler_bairros, municipio["id_municipio"]) or []
         # O distrito-sede tem o mesmo nome da cidade e não ajuda na busca por área.
-        bairros = [b for b in bairros if b.strip().lower() != cidade.strip().lower()]
+        bairros = [b for b in bairros if _normalizar(b) != _normalizar(nome_oficial)]
         fonte = municipio["bairros_fonte"]
         if fonte == localidades_db.FONTE_CIDADE or not bairros:
-            print(f"Base local: {cidade}-{uf} sem bairros (fonte: {fonte}).")
+            print(f"Base local: {nome_oficial}-{uf} sem bairros (fonte: {fonte}).")
             return []
-        print(f"Base local: {len(bairros)} bairros de {cidade}-{uf} (fonte: {fonte}).")
+        print(f"Base local: {len(bairros)} bairros de {nome_oficial}-{uf} (fonte: {fonte}).")
         return bairros
 
-    bairros, fonte = _descobrir_bairros(cidade, uf, municipio)
+    bairros, fonte = _descobrir_bairros(nome_oficial, uf, municipio)
 
     if municipio and fonte:
         _salvar(localidades_db.salvar_bairros, municipio["id_municipio"], bairros, fonte)
@@ -393,6 +456,104 @@ def obter_termos_busca(cidade, uf, max_bairros=30):
 
     print("Nenhum bairro encontrado. Buscando a cidade inteira.")
     return [cidade]
+
+
+def listar_municipios_pendentes(uf):
+    """Lista os municípios da UF que ainda não têm bairros resolvidos.
+
+    Se a UF ainda não estiver na base local, baixa a lista do IBGE (e grava, se
+    LOCALIDADES_SALVAR permitir). Retorna [] quando todos já estão resolvidos.
+    """
+    pendentes = _cache(localidades_db.ler_municipios_pendentes, uf)
+    if pendentes is None:
+        return []
+    if pendentes:
+        return pendentes
+
+    # Nada pendente: só é "tudo pronto" se a UF estiver na base local.
+    if _cache(localidades_db.ler_municipios, uf):
+        return []
+
+    print(f"  {uf} ainda não está na base local. Baixando a lista de municípios do IBGE...")
+    municipios = _baixar_municipios(uf)
+    if not municipios:
+        return []
+    _salvar(localidades_db.salvar_municipios, municipios)
+    return [{"id_municipio": m["id_municipio"], "nome": m["nome"]} for m in municipios]
+
+
+def aquecer_bairros_uf(uf, cidades=None, max_cidades=0, pausa_segundos=None):
+    """Resolve e grava os bairros de todas as cidades de uma UF (uma única vez).
+
+    Útil para preparar o cache e depois rodar a coleta sem nenhuma consulta de
+    rede. A pausa entre cidades é aplicada só quando o OpenStreetMap foi de fato
+    consultado (cidades cobertas pelo IBGE são instantâneas).
+
+    Retorna um dicionário com o resumo da execução.
+    """
+    if not SALVAR:
+        print("\nLOCALIDADES_SALVAR=false: não é possível aquecer a base local.")
+        print("Ative a flag LOCALIDADES_SALVAR para gravar os bairros.")
+        return None
+
+    pausa_segundos = AQUECER_PAUSA_PADRAO if pausa_segundos is None else pausa_segundos
+
+    if cidades is None:
+        print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
+        cidades = listar_municipios_pendentes(uf)
+
+    total_pendente = len(cidades)
+    if not total_pendente:
+        print(f"Todas as cidades de {uf} já têm bairros na base local. Nada a fazer.")
+        return {"uf": uf, "pendentes": 0, "processadas": 0, "ibge": 0,
+                "osm": 0, "sem_bairros": 0, "falhas": 0}
+
+    if max_cidades and max_cidades > 0:
+        cidades = cidades[:max_cidades]
+
+    print(f"\nAquecendo bairros de {len(cidades)} cidade(s) de {uf} "
+          f"({total_pendente} pendente(s) no total).")
+    print(f"Pausa entre cidades que usam OpenStreetMap: {pausa_segundos}s")
+    print("Interrompa com Ctrl+C — o progresso já gravado é preservado.\n")
+
+    resumo = {"uf": uf, "pendentes": total_pendente, "processadas": 0,
+              "ibge": 0, "osm": 0, "sem_bairros": 0, "falhas": 0}
+
+    try:
+        for indice, cidade in enumerate(cidades, 1):
+            nome = cidade["nome"]
+            print(f"[{indice}/{len(cidades)}] {nome}-{uf}")
+
+            bairros = obter_bairros(nome, uf)
+            municipio = _cache(localidades_db.buscar_municipio, nome, uf)
+            fonte = (municipio or {}).get("bairros_fonte")
+            resumo["processadas"] += 1
+
+            if fonte is None:
+                resumo["falhas"] += 1
+                print(f"  Falhou (nada gravado). Pulando.")
+            elif fonte == localidades_db.FONTE_OVERPASS:
+                resumo["osm"] += 1
+            elif fonte == localidades_db.FONTE_IBGE:
+                resumo["ibge"] += 1
+            else:
+                resumo["sem_bairros"] += 1
+
+            usou_osm = fonte in (localidades_db.FONTE_OVERPASS,
+                                 localidades_db.FONTE_CIDADE)
+            if usou_osm and indice < len(cidades):
+                time.sleep(pausa_segundos)
+    except KeyboardInterrupt:
+        print("\nInterrompido pelo usuário. O que já foi gravado está preservado.")
+
+    print(f"\nResumo de {uf}: {resumo['processadas']} cidade(s) processada(s) "
+          f"de {total_pendente} pendente(s).")
+    print(f"  via IBGE: {resumo['ibge']} | via OpenStreetMap: {resumo['osm']} | "
+          f"sem bairros: {resumo['sem_bairros']} | falhas: {resumo['falhas']}")
+    restantes = total_pendente - resumo["processadas"]
+    if restantes > 0:
+        print(f"  {restantes} cidade(s) continuam pendentes — rode novamente para retomar.")
+    return resumo
 
 
 def _descrever_gravacao(total, recebidos):

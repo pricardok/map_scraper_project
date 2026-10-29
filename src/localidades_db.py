@@ -125,6 +125,18 @@ def ler_municipios(uf, db_path=None):
     return df.to_dict("records")
 
 
+def ler_municipios_pendentes(uf, db_path=None):
+    """Municípios da UF cujos bairros ainda não foram resolvidos (bairros_fonte nulo)."""
+    with conexao(db_path) as con:
+        df = _ler(con, """
+            SELECT id_municipio, nome
+            FROM localidades_municipios
+            WHERE uf = ? AND bairros_fonte IS NULL
+            ORDER BY nome
+        """, [uf]).df()
+    return df.to_dict("records")
+
+
 def salvar_municipios(registros, db_path=None):
     df = pd.DataFrame(list(registros), columns=["id_municipio", "nome", "uf"])
     df = df.dropna(subset=["id_municipio"]).drop_duplicates("id_municipio")

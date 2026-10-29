@@ -10,7 +10,7 @@ Documentação do Projeto: MAP SCRAPER
 
     A ferramenta foi construída com uma arquitetura modular e conta com os seguintes recursos:
 
-        - Busca Dinâmica de Localidades: Integração com a API do IBGE para listar Estados, Cidades e Distritos, gravando tudo em tabelas locais (cache) para não depender da rede nas próximas execuções. Complemento com Nominatim + Overpass (OpenStreetMap) para descobrir bairros quando o IBGE não cobre a cidade. Se nenhum bairro for encontrado, ele faz fallback buscando a cidade inteira.
+        - Busca Dinâmica de Localidades: Integração com a API do IBGE para listar Estados, Cidades e Distritos, gravando tudo em tabelas locais (cache) para não depender da rede nas próximas execuções. O nome digitado é confirmado no IBGE (aceita sem acento e em minúsculas) e o nome oficial é usado nas buscas. Complemento com Nominatim + Overpass (OpenStreetMap) para descobrir bairros quando o IBGE não cobre a cidade. Se nenhum bairro for encontrado, ele faz fallback buscando a cidade inteira.
 
         - Scraping em Multithreading: Uso do Playwright com ThreadPoolExecutor para abrir múltiplos navegadores simultaneamente e acelerar a coleta em diferentes bairros.
 
@@ -92,12 +92,13 @@ Documentação do Projeto: MAP SCRAPER
 
     python src/main.py
     Passo 3: Interação no Terminal
-    O menu tem 4 opções:
+    O menu tem 5 opções:
 
     1 - Coletar leads: faz 5 perguntas simples (UF, Cidade, Nicho, Bairros automáticos, Ver navegador).
     2 - Enviar mensagens WhatsApp: envia para os leads celulares pendentes (ver seção 7).
     3 - Sincronizar base de localidades (IBGE): baixa estados, municípios e distritos para o DuckDB (ver seção 8).
-    4 - Sair.
+    4 - Aquecer bairros de uma UF (OpenStreetMap): resolve e grava os bairros de todas as cidades do estado (ver seção 8).
+    5 - Sair.
 
     Passo 4: Resultados
 
@@ -174,6 +175,7 @@ Documentação do Projeto: MAP SCRAPER
     LOCALIDADES_USAR_CACHE=true
     LOCALIDADES_SALVAR=true
     LOCALIDADES_MIN_BAIRROS=3
+    AQUECER_PAUSA_SEGUNDOS=2
     ```
 
     - LOCALIDADES_USAR_CACHE=true (padrão): consulta o banco primeiro e só chama a
@@ -186,6 +188,8 @@ Documentação do Projeto: MAP SCRAPER
     - LOCALIDADES_MIN_BAIRROS: mínimo de distritos do IBGE para a cidade ser
       considerada coberta. Abaixo disso, os bairros são complementados com o
       OpenStreetMap (Nominatim + Overpass) e o resultado também fica em cache.
+    - AQUECER_PAUSA_SEGUNDOS: pausa entre cidades no aquecimento por UF, aplicada
+      somente quando a cidade usou o OpenStreetMap.
 
     As duas flags são independentes:
 
@@ -214,11 +218,45 @@ Documentação do Projeto: MAP SCRAPER
     Sincronização completa: menu opção 3 (ou `sincronizar_base_localidades()`), que
     baixa de uma vez todos os estados, municípios e distritos (~10,7 mil registros).
 
+    Aquecimento por UF: menu opção 4 (ou `aquecer_bairros_uf('RS')`). Resolve e
+    grava os bairros de TODAS as cidades de um estado, sem raspar nenhum lead.
+    Depois disso, a coleta por cidade não consulta mais IBGE/OSM.
+
+    - Processa apenas as cidades com `bairros_fonte IS NULL` (ou seja, retoma de
+      onde parou em execuções anteriores).
+    - Cidades cobertas pelo IBGE são instantâneas; as demais usam o OpenStreetMap.
+    - A pausa entre cidades (AQUECER_PAUSA_SEGUNDOS) é aplicada somente quando o
+      OSM foi consultado — respeitando o limite de 1 req/s do Nominatim.
+    - Ctrl+C interrompe sem perder o que já foi gravado; basta rodar de novo.
+    - É possível limitar quantas cidades processar por execução.
+
     Importante: os "distritos" do IBGE são divisões administrativas e, em muitos
     municípios, resumem-se à própria sede. Por isso o fallback com o OSM continua
     existindo — a diferença é que ele roda uma única vez por cidade e o resultado
     é gravado no banco. Se o OSM estiver fora do ar, nada é gravado (a próxima
     execução tenta de novo) e a coleta segue com os distritos do IBGE.
+
+    A API de Localidades do IBGE NÃO fornece bairros — apenas distritos e
+    subdistritos. Exemplo real: Canoas-RS tem 1 distrito (a própria sede) e 0
+    subdistritos, então o IBGE não contribui com áreas para essa cidade e o robô
+    informa isso e segue para o OpenStreetMap:
+
+    ```
+    IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).
+    Buscando bairros no OpenStreetMap...
+    ```
+
+    Cidades com vários distritos (São Paulo: 96, Campinas: 7) usam o IBGE e não
+    consultam o OSM. Das 5.571 cidades do país, 643 têm distritos suficientes.
+
+    Como a cidade é resolvida: o nome digitado é comparado sem acento e sem
+    diferenciar maiúsculas ("canoas", "sao leopoldo") com a lista do IBGE, e o nome
+    oficial é exibido e usado no scraping, no banco e no Excel:
+
+    ```
+    Digite o nome da cidade: canoas
+    Município (IBGE): Canoas-RS | código 4304606
+    ```
 
     Para forçar a atualização de uma cidade já gravada, limpe a marca:
     ```sql
