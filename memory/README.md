@@ -17,6 +17,7 @@ Use esta pasta como **primeira fonte de contexto**.
 | 3 | [02-decisoes-e-armadilhas.md](./02-decisoes-e-armadilhas.md) | Decisões técnicas, bugs conhecidos, cuidados |
 | 4 | [03-historico-de-mudancas.md](./03-historico-de-mudancas.md) | O que mudou recentemente e por quê |
 | 5 | [04-como-contribuir.md](./04-como-contribuir.md) | Padrões de código, logs, config, testes e documentação |
+| 6 | [05-plano-coleta-nacional-docker.md](./05-plano-coleta-nacional-docker.md) | **Plano aprovado (não implementado):** banco plugável, fila de jobs, circuit breaker WAHA, Docker |
 
 ## Regras de manutenção
 

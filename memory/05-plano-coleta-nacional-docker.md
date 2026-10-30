@@ -1,0 +1,291 @@
+# 05 — Plano: Coleta Nacional + Docker + Envio Resiliente
+
+> **Status: desenho aprovado em 2026-10-30, ainda NÃO implementado.**
+> Este arquivo é a referência da refatoração. Ao implementar cada fase, mova o
+> que virou comportamento real para `01`/`02` e registre em `03`.
+
+## Decisões fechadas (2026-10-30)
+
+| Tema | Decisão |
+|---|---|
+| Banco | **Plugável via `.env`** — DuckDB ou PostgreSQL, mesmo código |
+| Topologia | App em container Linux, WAHA em container separado |
+| Escopo Brasil | **Priorizado**: capitais → maiores cidades → cauda longa |
+| Envio | **Outbox** (`fila_envio`), não mais `leads.status_whatsapp` |
+| WAHA fora do ar | **Circuito abre, envio para, coleta continua** |
+| Proxies | Sem proxy por ora (IP único) → concorrência baixa |
+
+---
+
+## 1. Banco plugável
+
+`.env`:
+
+```
+DB_URL=duckdb:///data/leads.duckdb
+# DB_URL=postgresql://leads:senha@postgres:5432/leads
+```
+
+Novo pacote `src/db/` — o resto do código **nunca** importa `duckdb` nem `psycopg`:
+
+| Arquivo | Papel |
+|---|---|
+| `base.py` | Protocolo `BancoDados`: `executar`, `consultar_df`, `executar_muitos`, `transacao`, `inserir_retornando_id`, `placeholder` |
+| `duckdb_adapter.py` | `?` como placeholder; `.df()` para DataFrame |
+| `postgres_adapter.py` | `%s`; `pd.read_sql`; pool de conexões |
+| `schema.py` | DDL único em SQL ANSI (executado com `CREATE TABLE IF NOT EXISTS`) |
+| `writer.py` | `DatabaseWriter`: fila única de escrita (obrigatória no DuckDB) |
+| `repos/*.py` | `leads.py`, `coleta_jobs.py`, `fila_envio.py`, `eventos.py` |
+
+Regras para o SQL ser portável:
+
+| Item | Regra |
+|---|---|
+| IDs | `VARCHAR` com `uuid4().hex` gerado em Python — **nunca** `SERIAL`/sequence |
+| Placeholders | sempre via `adapter.placeholder` / helpers de bind |
+| UPSERT | `ON CONFLICT (...) DO UPDATE` — exige `UNIQUE` explícito |
+| Introspecção de colunas | `information_schema.columns` (funciona nos dois) |
+| Timestamps | `TIMESTAMP` + `datetime.now(timezone.utc)` naive-UTC (padronizar em UTC no banco) |
+| Dialeto | **proibido** `QUALIFY`, `LIST`, `STRUCT`, `DESCRIBE`, `PRAGMA` |
+| Pandas | sempre pelo adapter, nunca `conn.df()` direto |
+
+### Concorrência: a regra é "um escritor", não "um de cada vez"
+
+> Refinado em 2026-10-30. A versão anterior deste plano sugeria alternar coleta
+> e envio no DuckDB. **Decisão: não alternar.** A fila única de escrita já
+> resolve o conflito; alternar só desperdiça throughput.
+
+| Cenário | Coleta + envio simultâneos? | Paralelismo |
+|---|---|---|
+| **DuckDB** | **Sim** (mesmo container, mesmo processo) | threads de scraping + 1 despachante + 1 writer |
+| **PostgreSQL** | Sim | N containers; lease por job |
+
+Por que **um** escritor e não N conexões:
+
+1. `duckdb` connection **não é thread-safe** — dois threads no mesmo `conn` corrompem estado.
+2. Duas conexões no mesmo processo geram `write-write conflict` (MVCC aborta o commit) — exige retry, é mais lento que serializar.
+3. `conn.register('df_temp', df)` tem escopo **por conexão**: duas threads registrando o mesmo nome já quebram o `save_leads` atual.
+
+O `save_callback` atual só funciona por acidente (roda no loop de `as_completed`,
+na thread principal). Qualquer 2º loop de escrita exige o writer.
+
+```mermaid
+flowchart LR
+    S1[scraper T1] --> Q[(fila de escrita)]
+    S2[scraper T2] --> Q
+    D[despachante WAHA] --> Q
+    Q --> W[DatabaseWriter<br/>1 conexão, flush em lote]
+    W --> DB[(banco)]
+    W -.leituras.-> D
+```
+
+**Contenção de recursos** (Playwright ≈ 200–400 MB/browser) NÃO se resolve com
+exclusão mútua; resolve-se com `MAX_BROWSERS` (semáforo). O despachante custa
+quase nada (1 request a cada `WAHA_INTERVALO`).
+
+### Política de flush (durabilidade × velocidade)
+
+```
+flush quando  linhas >= DB_LOTE_MIN
+           OU fila ociosa por DB_DEBOUNCE_SEGUNDOS
+           OU job concluído (lease liberado)
+```
+
+- `DB_LOTE_MIN=200`, `DB_DEBOUNCE_SEGUNDOS=2`.
+- Como uma área gera ~20 leads em 2–4 min, o comportamento prático continua
+  sendo **1 commit por área**, com commits coalescidos quando threads terminam juntas.
+- O custo real não é o UPSERT (vetorizado, µs), é o **fsync do WAL** → coalescer é o ganho.
+- Durabilidade: erro no meio de um flush derruba **um lote**; o lease vence e a
+  área é recoletada. Nunca se perde a fila.
+
+Novas variáveis:
+
+```
+DB_LOTE_MIN=200              # linhas que forçam o flush
+DB_DEBOUNCE_SEGUNDOS=2       # flush por ociosidade da fila
+MAX_BROWSERS=3               # semáforo de recursos (não é exclusão mútua)
+```
+
+**Melhorias obrigatórias no `save_leads` ao entrar no writer:**
+
+- `SELECT nome, cidade FROM leads WHERE status='descartado'` roda **a cada flush** hoje
+  → virar cache em memória, invalidado quando um lead é descartado.
+- `register`/`unregister` de view temporária com nome fixo → nome único por lote
+  (`df_lote_{uuid}`) ou `registrar_lote()` no adapter.
+- `lead_id` usa `SEQUENCE` (DuckDB-only) → no PG, `BIGINT GENERATED BY DEFAULT AS IDENTITY`;
+  nas tabelas novas, `uuid4().hex` em Python.
+- `localidades_db.py` passa a usar o adapter e **deixa de abrir/fechar**
+  conexão por operação (o `CacheIndisponivel` continua existindo para PG fora).
+
+---
+
+## 2. Modelo de dados novo
+
+```sql
+coleta_jobs (
+  id VARCHAR PRIMARY KEY,
+  nicho VARCHAR NOT NULL, uf VARCHAR NOT NULL,
+  cidade VARCHAR NOT NULL, termo VARCHAR NOT NULL,
+  prioridade INTEGER DEFAULT 100,
+  status VARCHAR DEFAULT 'pendente',      -- pendente|reservado|concluido|erro|bloqueado
+  tentativas INTEGER DEFAULT 0,
+  worker_id VARCHAR, lease_ate TIMESTAMP,
+  resultados INTEGER DEFAULT 0, erro VARCHAR,
+  criado_em TIMESTAMP, atualizado_em TIMESTAMP, concluido_em TIMESTAMP,
+  UNIQUE (nicho, uf, cidade, termo)       -- idempotência do planejador
+);
+
+fila_envio (
+  id VARCHAR PRIMARY KEY,
+  lead_id BIGINT NOT NULL, campanha_id VARCHAR NOT NULL,
+  template_id INTEGER,
+  status VARCHAR DEFAULT 'pendente',      -- pendente|enviando|enviado|erro_transitorio|invalido|cancelado
+  tentativas INTEGER DEFAULT 0,
+  proximo_envio_em TIMESTAMP,
+  erro VARCHAR, criado_em TIMESTAMP, enviado_em TIMESTAMP,
+  UNIQUE (lead_id, campanha_id)           -- nunca envia 2x a mesma campanha
+);
+
+sistema_estado (chave VARCHAR PRIMARY KEY, valor VARCHAR, atualizado_em TIMESTAMP);
+sistema_eventos (id VARCHAR PRIMARY KEY, ts TIMESTAMP, nivel VARCHAR,
+                 componente VARCHAR, evento VARCHAR, detalhe VARCHAR);
+
+municipios_populacao (id_municipio VARCHAR PRIMARY KEY, populacao INTEGER, atualizado_em TIMESTAMP);
+```
+
+- `sistema_estado` guarda o **estado do circuito** (`waha.circuito`,
+  `waha.falhas_consecutivas`, `waha.aberto_ate`) — reiniciar o container **não**
+  pode voltar a martelar a WAHA.
+- Leases vencidos (`status='reservado' AND lease_ate < now`) voltam a `pendente`
+  na inicialização e a cada ciclo. É isso que dá retomada após crash.
+- Backfill único: leads com `status_whatsapp='enviado'` viram `fila_envio`
+  `enviado` na campanha `historico`.
+
+---
+
+## 3. Planejador (o "Brasil inteiro")
+
+`src/planner.py` — idempotente, roda antes/durante a coleta:
+
+1. `UF` alvo → `localidades_municipios`.
+2. Ordena por `prioridade = tier*10000 - rank_populacao`:
+   - tier 1 = 27 capitais; tier 2 = população ≥ 100 mil; tier 3 = resto.
+   - População vem da SIDRA/IBGE 6579, cacheada em `municipios_populacao`.
+3. Para cada município, `obter_termos_busca()` (bairros já aquecidos, `max_bairros`
+   configurável) → `INSERT ... ON CONFLICT DO NOTHING` em `coleta_jobs`.
+
+Efeito: rodar de novo não duplica; parar no meio não perde; dá para acompanhar
+progresso por UF/cidade com uma query.
+
+**Expectativa realista (IP único, 2–3 threads):** ~2,5 min por termo,
+~30 bairros por cidade ⇒ ~30–40 min por cidade ⇒ 5.571 municípios ≈
+**2.000–3.000 h por nicho**. Por isso o tier 1–2 entrega valor nas primeiras
+semanas e a cauda longa é "infinito de fundo". Sem proxy, **não** aumentar
+threads além de 3 (o `_marcar_bloqueio_global` já existe e vai disparar).
+
+---
+
+## 4. Circuit breaker da WAHA
+
+`src/waha_circuito.py` + `src/despachante.py` (thread única).
+
+Estados persistidos: `FECHADO → ABERTO → MEIO_ABERTO → FECHADO`.
+Backoff exponencial: `30s → 60s → 300s → 900s → 1800s` (teto `WAHA_BACKOFF_MAX`).
+
+| Sinal | Classificação | Ação |
+|---|---|---|
+| `ConnectionError`, `Timeout`, HTTP 5xx | transitório | lead → `erro_transitorio` + `proximo_envio_em`, conta falha, pode abrir circuito |
+| HTTP 401/403 | sessão inválida | abre circuito imediatamente |
+| Sessão `STOPPED`/`FAILED`/`SCAN_QR_CODE` | sessão offline | abre circuito |
+| HTTP 429 / rate limit | throttle | **não** abre; aumenta `WAHA_INTERVALO` temporariamente, respeita `Retry-After` |
+| `numberExists: false` | permanente do lead | `invalido`; **não** conta falha do circuito |
+| HTTP 500 com `@c.us` | formato de chatId | já tratado por `_resolver_chatid_waha` (`@lid`) |
+
+- Probe em `MEIO_ABERTO`: `GET /api/sessions/{session}` (não envia mensagem).
+  Se `WORKING`, tenta **1** lead de uma campanha de teste; sucesso fecha o circuito.
+- Abrir o circuito **não** afeta o coletor: são loops independentes e ambos
+  escrevem pela mesma fila (ver §1). Vale para DuckDB e PG.
+- `disparar_campanha` deixa de ser o caminho de produção; vira wrapper do
+  despachante para uso interativo/legado.
+
+`.env` novo:
+
+```
+WAHA_CIRCUITO_ATIVO=true
+WAHA_FALHAS_PARA_ABRIR=3
+WAHA_BACKOFF_INICIAL=30
+WAHA_BACKOFF_MAX=1800
+WAHA_PROBE_SEGUNDOS=120
+WAHA_CAP_DIARIO=                     # vazio = sem teto
+CAMPANHA_ID=padrao
+```
+
+---
+
+## 5. Execução (sem menu)
+
+`src/main.py` mantém o menu para uso local e ganha subcomandos:
+
+```
+python -m src.main coletar --nicho barbearias --escopo brasil [--uf RS] [--workers 3]
+python -m src.main enviar  --campanha padrao [--limite 200]
+python -m src.main daemon  --nicho barbearias --escopo brasil   # coleta + envio juntos
+python -m src.main status  [--uf RS]
+```
+
+Loop do `daemon` (3 threads de alto nível + pool de scraping):
+
+1. **Planejador** (a cada N min): repõe `coleta_jobs`.
+2. **Coletor**: reserva jobs, roda `extrair_leads_local` no pool, salva via writer.
+3. **Despachante**: se circuito fechado, puxa `fila_envio` e envia respeitando intervalo/cap.
+
+Todos os writes passam por `DatabaseWriter` (fila única) — some o risco de
+escrita concorrente no DuckDB.
+
+---
+
+## 6. Docker
+
+```
+docker-compose.yml
+├── app    (python:3.11-slim + playwright install --with-deps chromium)
+│          volumes: /data, /output; restart: unless-stopped
+│          env: DB_URL, WAHA_API_URL=http://waha:3000, ...
+└── waha   (devlikeapro/waha) volume de sessão; SEM porta publicada
+```
+
+- Logs em **stdout** (JSON opcional) — nada de `input()` no container.
+- `SIGTERM`: parar de reservar jobs, drenar o writer, fechar o banco
+  (consolida o WAL do DuckDB), sair 0.
+- Healthcheck: linha recente em `sistema_eventos` + `GET /api/sessions` quando
+  o circuito estiver fechado.
+- Postgres (opcional): terceiro serviço; o app não muda.
+- Backups: `cp` do `.duckdb` **com o app parado** (WAL) ou `pg_dump`.
+
+---
+
+## 7. Riscos e limites (aceitos no desenho)
+
+- **IP único** ⇒ captcha frequente; volume real fica em dezenas de milhares de
+  buscas/mês, não no Brasil inteiro em semanas.
+- Scraping do Maps contraria o ToS do Google; disparo em massa não solicitado
+  eleva risco de ban do número. Mitigação: intervalo, cap diário, ramp-up de
+  número novo, opt-out no texto.
+- LGPD: guardar telefone/nome exige base legal e canal de exclusão.
+- `leads` deduplica por `(nome, cidade)` e `marcar_envio` atualiza por
+  `(nome, cidade)` — **revisar** para `place_id`/telefone antes do escopo
+  nacional (homônimos e múltiplos nichos colidem).
+
+---
+
+## 8. Fases de implementação
+
+| Fase | Entrega | Critério de pronto |
+|---|---|---|
+| F0 | `src/db/` (adapters + `schema.py` + `DatabaseWriter` com flush em lote) e `DB_URL` | roda em DuckDB **e** PG com o fluxo atual, sem `save_callback` na thread de scraping |
+| F1 | `coleta_jobs` + `planner.py` + subcomando `coletar` | retomada após kill -9 sem duplicar; `MAX_BROWSERS` respeitado |
+| F2 | `fila_envio` + `waha_circuito.py` + `despachante.py` | derrubar WAHA → coletor segue coletando, envio volta sozinho |
+| F3 | Dockerfile + compose + SIGTERM + logs | `docker compose restart` preserva fila e estado do circuito |
+| F4 | `status`, cap diário, métricas | progresso por UF legível |
+
+Não iniciar F1 antes de F0: o planejador depende da camada de banco.

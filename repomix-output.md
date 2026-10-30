@@ -1,37 +1,44 @@
-Este arquivo é uma representação mesclada de todo o código-fonte, combinado em um único documento pelo Repomix.
-O conteúdo foi processado onde números de linha foram adicionados.
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+The content has been processed where line numbers have been added.
 
-# Resumo do Arquivo
+# File Summary
 
-## Propósito
-Este arquivo contém uma representação empacotada de todo o conteúdo do repositório. Ele foi projetado para ser facilmente consumível por sistemas de IA para análise, revisão de código ou outros processos automatizados.
+## Purpose
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
 
-## Formato do Arquivo
-O conteúdo está organizado da seguinte forma:
-1. Esta seção de resumo
-2. Informações do repositório
-3. Estrutura de diretórios
-4. Arquivos do repositório (se habilitado)
-5. Múltiplas entradas de arquivos, cada uma consistindo de:
-  a. Um cabeçalho com o caminho do arquivo (## File: path/to/file)
-  b. O conteúdo completo do arquivo em um bloco de código
+## File Format
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  a. A header with the file path (## File: path/to/file)
+  b. The full contents of the file in a code block
 
-## Diretrizes de Uso
-- Este arquivo deve ser tratado como somente leitura. Quaisquer alterações devem ser feitas nos arquivos originais do repositório, não nesta versão empacotada.
-- Ao processar este arquivo, use o caminho do arquivo para distinguir entre os diferentes arquivos no repositório.
-- Esteja ciente de que este arquivo pode conter informações confidenciais. Manuseie-o com o mesmo nível de segurança que você faria com o repositório original.
-- Preste atenção especial às Instruções do Repositório. Elas contêm contexto importante e diretrizes específicas para este projeto.
+## Usage Guidelines
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
 
-## Notas
-- Alguns arquivos podem ter sido excluídos com base nas regras do .gitignore e na configuração do Repomix.
-- Arquivos binários não estão incluídos nesta representação empacotada. Consulte a seção de Estrutura do Repositório para obter uma lista completa de caminhos de arquivos, incluindo arquivos binários.
-- Arquivos que correspondem a padrões no .gitignore são excluídos.
-- Arquivos que correspondem a padrões de ignore padrão são excluídos.
-- Números de linha foram adicionados ao início de cada linha.
-- Os arquivos são classificados por contagem de alterações do Git (arquivos com mais alterações estão na parte inferior).
-- Os diffs do Git da árvore de trabalho e das alterações preparadas estão incluídos.
+- Pay special attention to the Repository Instruction. These contain important context and guidelines specific to this project.
 
-# Estrutura de Diretórios
+## Notes
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Line numbers have been added to the beginning of each line
+- Files are sorted by Git change count (files with more changes are at the bottom)
+- Git diffs from the worktree and staged changes are included
+
+# Directory Structure
+`````
 data/
   leads.duckdb
 memory/
@@ -59,12 +66,202 @@ README.md
 repomix-instrucao.md
 repomix.config.json
 requirements.txt
-````
+`````
 
 # Files
 
+## File: memory/04-como-contribuir.md
+`````markdown
+ 1: # 04 — Como Contribuir: Padrões e Boas Práticas
+ 2: 
+ 3: Este documento detalha os padrões de código, estilo e comunicação esperados
+ 4: para novas contribuições, visando manter a consistência e facilitar a manutenção.
+ 5: 
+ 6: ---
+ 7: 
+ 8: ## 1. Organização de Código e Nomenclatura
+ 9: 
+10: - **Imports:** Sempre absolutos, começando da raiz `src/`. Ex: `from src.config import ...`.
+11: - **Constantes:** `MAIUSCULAS_COM_UNDERLINE`.
+12: - **Funções privadas (internas ao módulo):** `_nome_da_funcao_privada` (com underscore inicial).
+13: - **Variáveis locais:** `snake_case`.
+14: - **Classes:** `CamelCase`.
+15: - **Parâmetros de função:** `snake_case`.
+16: 
+17: ---
+18: 
+19: ## 2. Logs e Interação com o Usuário
+20: 
+21: - **Prints de progresso:** Use `print(f"[{area_da_busca}] Mensagem...")`.
+22:   O `[área]` (ex: `[Canoas-RS]`, `[Assis Brasil]`) ajuda a identificar qual thread
+23:   ou cidade está processando no momento.
+24: - **Mensagens de erro:** Inclua `type(e).__name__` e `str(e)[:N]` para facilitar
+25:   a depuração em ambientes remotos ou com logs limitados.
+26: - **Interação:** Use `input()` para entradas do usuário no console. Evite `print()`
+27:   seguido de `input()` em linhas separadas para prompts, a menos que seja intencional.
+28: - **Mensagens para o usuário:** Devem ser claras e úteis, preferencialmente
+29:   em português (padrão atual do projeto).
+30: 
+31: ---
+32: 
+33: ## 3. Variáveis de Ambiente e Configuração
+34: 
+35: - **Todas as configurações** devem ser lidas do `.env` via `src/config.py`.
+36: - **Nunca faça hardcode** de URLs de APIs, chaves, limites, etc.
+37: - **Novas variáveis:** Adicione ao `.env.example` com comentários explicativos.
+38: - **Semântica:** Use `true`/`false` para booleanos, números para inteiros.
+39:   O `src/config.py` já tem helpers para isso (`str_para_bool`, `env_int`).
+40: 
+41: ---
+42: 
+43: ## 4. Testes e Validação
+44: 
+45: - **Testes unitários/de integração:** Idealmente, adicione pequenos scripts de
+46:   validação (como os que o modelo Gemini tem feito) para cobrir novas features
+47:   ou refatorações.
+48: - **DuckDB:** Para testes que não devem tocar no banco real, use um arquivo
+49:   DuckDB temporário (`tempfile.gettempdir()`) e defina `localidades_db.DB_PATH_PADRAO`.
+50: - **Encoding:** Mantenha os arquivos em **UTF-8 sem BOM**.
+51:   Valide a acentuação após edições em lote: procure caracteres de dupla
+52:   codificação (por exemplo, `A` com til U+00C3 seguido de símbolo de moeda).
+53: 
+54: ---
+55: 
+56: ## 5. Documentação
+57: 
+58: - **`README.md` (raiz):** Manual do usuário, instalação, execução, fluxo geral.
+59: - **`memory/`:** Resumos densos para modelos de IA. **Atualize ao mudar comportamento**.
+60:   - `00-resumo-projeto.md`: alto nível.
+61:   - `01-arquitetura-e-modulos.md`: detalhe de cada módulo.
+62:   - `02-decisoes-e-armadilhas.md`: o "porquê" das decisões, bugs conhecidos.
+63:   - `03-historico-de-mudancas.md`: log recente das mudanças importantes.
+64: - **Docstrings:** Use docstrings Python para explicar funções e classes.
+65: - **Comentários de código:** Breves e pontuais, explicando lógica complexa ou escolhas não óbvias.
+`````
+
+## File: src/__init__.py
+`````python
+1: 
+`````
+
+## File: src/config.py
+`````python
+ 1: # src/config.py
+ 2: """Carregamento centralizado do arquivo .env e leitura de flags.
+ 3: 
+ 4: Todos os módulos importam este arquivo, então o `.env` é lido uma única vez
+ 5: por processo, antes de qualquer constante de configuração ser calculada.
+ 6: """
+ 7: import os
+ 8: 
+ 9: PROJETO_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+10: CAMINHO_ENV = os.path.join(PROJETO_RAIZ, ".env")
+11: 
+12: 
+13: def carregar_env(caminho=None):
+14:     """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
+15: 
+16:     Não sobrescreve variáveis que já existem no ambiente. Ignora linhas em
+17:     branco, comentários (#) e valores entre aspas.
+18:     """
+19:     caminho = caminho or CAMINHO_ENV
+20:     if not os.path.isfile(caminho):
+21:         return
+22: 
+23:     with open(caminho, "r", encoding="utf-8-sig") as arquivo:
+24:         for linha in arquivo:
+25:             linha = linha.strip()
+26:             if not linha or linha.startswith("#") or "=" not in linha:
+27:                 continue
+28:             chave, _, valor = linha.partition("=")
+29:             chave = chave.strip()
+30:             valor = valor.strip().strip('"').strip("'")
+31:             if chave and chave not in os.environ:
+32:                 os.environ[chave] = valor
+33: 
+34: 
+35: def str_para_bool(valor, padrao=False):
+36:     """Converte strings comuns de booleano ('true', '1', 'sim', 's', 'yes') em bool."""
+37:     if valor is None:
+38:         return padrao
+39:     return str(valor).strip().lower() in ("1", "true", "yes", "s", "sim", "on")
+40: 
+41: 
+42: def env_int(nome, padrao):
+43:     """Lê uma variável de ambiente inteira, com fallback para o padrão."""
+44:     valor = os.environ.get(nome, "").strip()
+45:     if not valor:
+46:         return padrao
+47:     try:
+48:         return int(float(valor))
+49:     except ValueError:
+50:         return padrao
+51: 
+52: 
+53: # Lido no import: qualquer módulo que importe `src.config` já tem o .env aplicado.
+54: carregar_env()
+`````
+
+## File: src/utils.py
+`````python
+ 1: # src/utils.py
+ 2: import re
+ 3: 
+ 4: def formatar_telefone(telefone_bruto):
+ 5:     """
+ 6:     Limpa o telefone, identifica o tipo e gera o link do WhatsApp.
+ 7:     Retorna: (telefone_limpo, tipo, whatsapp_link)
+ 8:     """
+ 9:     if not telefone_bruto:
+10:         return "", "Não Informado", ""
+11:     
+12:     # Remove tudo que não for número
+13:     apenas_numeros = re.sub(r'\D', '', str(telefone_bruto))
+14:     
+15:     # Se o número já vier com DDI (55) e tiver 12 ou 13 dígitos, removemos o 55 
+16:     # temporariamente para classificar o tipo corretamente (Fixo/Celular)
+17:     if apenas_numeros.startswith('55') and len(apenas_numeros) > 11:
+18:         numero_sem_ddi = apenas_numeros[2:]
+19:     else:
+20:         numero_sem_ddi = apenas_numeros
+21: 
+22:     # Classificação e formatação do Link
+23:     if len(numero_sem_ddi) == 11: # Celular com 9 dígito
+24:         tipo = "Celular"
+25:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
+26:     elif len(numero_sem_ddi) == 10: # Fixo
+27:         tipo = "Fixo"
+28:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
+29:     elif len(apenas_numeros) > 0:
+30:         tipo = "Desconhecido"
+31:         whatsapp_link = f"https://wa.me/{apenas_numeros}"
+32:     else:
+33:         return "", "Não Informado", ""
+34:         
+35:     # Retorna apenas os números na coluna telefone, o tipo e o link pronto
+36:     return apenas_numeros, tipo, whatsapp_link
+`````
+
+## File: .gitkeep
+`````
+1: 
+`````
+
+## File: requirements.txt
+`````
+1: pandas
+2: openpyxl
+3: instagpy
+4: pip-system-certs
+5: playwright
+6: chromium
+7: geopy
+8: duckdb
+9: requests
+`````
+
 ## File: memory/00-resumo-projeto.md
-````markdown
+`````markdown
  1: # 00 — Resumo do Projeto
  2: 
  3: **Map Scraper** — ferramenta local de prospecção de leads B2B a partir do Google Maps.
@@ -73,74 +270,76 @@ requirements.txt
  6: - **Processo:** divide a busca por bairros, raspa o Google Maps com Playwright em
  7:   multithread e extrai nome, telefone, Instagram e site.
  8: - **Saída:** leads no DuckDB (`data/leads.duckdb`) + Excel em `output/`.
- 9: - **Extra:** dispara mensagens de WhatsApp via WAHA para leads já coletados.
-10: 
-11: ## Fluxo de alto nível
+ 9: - **Extra:** dispara mensagens de WhatsApp via WAHA para leads já coletados, com
+10:   templates reutilizáveis, filtros (número/cidade/nicho), teste de envio e cache
+11:   do chatId resolvido (`@lid`/`@c.us`).
 12: 
-13: ```
-14: menu (src/main.py)
-15:   └─ 1 Coletar    → locations.obter_termos_busca(cidade, uf)
-16:                   → scraper.rodar_scraper_multithread(...)
-17:                   → database.LeadDatabase.save_leads (UPSERT incremental)
-18:                   → database.export_to_excel
-19:   └─ 2 WhatsApp   → database.get_leads_para_envio
-20:                   → whatsapp.disparar_campanha (WAHA)
-21:   └─ 3 Sincronizar localidades (IBGE) → locations.sincronizar_base_localidades
-22:   └─ 4 Aquecer bairros de uma UF       → locations.aquecer_bairros_uf
-23:   └─ 5 Sair
-24: ```
-25: 
-26: ## Stack
+13: ## Fluxo de alto nível
+14: 
+15: ```
+16: menu (src/main.py)
+17:   └─ 1 Coletar    → locations.obter_termos_busca(cidade, uf)
+18:                   → scraper.rodar_scraper_multithread(...)
+19:                   → database.LeadDatabase.save_leads (UPSERT incremental)
+20:                   → database.export_to_excel
+21:   └─ 2 WhatsApp   → template ativo → filtros → teste → database.get_leads_para_envio
+22:                   → whatsapp.disparar_campanha (WAHA, chatId via checkNumberStatus)
+23:   └─ 3 Sincronizar localidades (IBGE) → locations.sincronizar_base_localidades
+24:   └─ 4 Aquecer bairros de uma UF       → locations.aquecer_bairros_uf
+25:   └─ 5 Sair
+26: ```
 27: 
-28: | Item | Tecnologia |
-29: |---|---|
-30: | Linguagem | Python 3.10+ (ambiente: `venv/`) |
-31: | Scraping | Playwright (Chromium) + ThreadPoolExecutor |
-32: | Banco | DuckDB (arquivo único, 1 processo por vez) |
-33: | Dados | Pandas |
-34: | Localidades | API IBGE + Nominatim/Overpass (OpenStreetMap) |
-35: | WhatsApp | WAHA (WhatsApp HTTP API) |
-36: | Config | `.env` carregado por `src/config.py` |
-37: 
-38: ## Estrutura
+28: ## Stack
+29: 
+30: | Item | Tecnologia |
+31: |---|---|
+32: | Linguagem | Python 3.10+ (ambiente: `venv/`) |
+33: | Scraping | Playwright (Chromium) + ThreadPoolExecutor |
+34: | Banco | DuckDB (arquivo único, 1 processo por vez) |
+35: | Dados | Pandas |
+36: | Localidades | API IBGE + Nominatim/Overpass (OpenStreetMap) |
+37: | WhatsApp | WAHA (WhatsApp HTTP API) |
+38: | Config | `.env` carregado por `src/config.py` |
 39: 
-40: ```
-41: map_scraper_project/
-42: ├── data/          leads.duckdb (+ .wal transiente, ignorado no Git)
-43: ├── memory/        esta documentação para IA
-44: ├── output/        Excel gerado (ignorado no Git)
-45: ├── src/
-46: │   ├── config.py          loader do .env + helpers (bool/int)
-47: │   ├── database.py        LeadDatabase: tabela leads, UPSERT, Excel, log WAHA
-48: │   ├── localidades_db.py  cache IBGE em DuckDB (tabelas localidades_*)
-49: │   ├── locations.py       IBGE + OSM + cache; sync e aquecimento por UF
-50: │   ├── scraper.py         Playwright, multithread, anti-captcha
-51: │   ├── utils.py           formatar_telefone → (telefone, tipo, link wa)
-52: │   ├── whatsapp.py        envio via WAHA
-53: │   └── main.py            menu interativo
-54: ├── .env / .env.example
-55: ├── requirements.txt
-56: └── README.md
-57: ```
-58: 
-59: ## Git — o que é versionado
+40: ## Estrutura
+41: 
+42: ```
+43: map_scraper_project/
+44: ├── data/          leads.duckdb (+ .wal transiente, ignorado no Git)
+45: ├── memory/        esta documentação para IA
+46: ├── output/        Excel gerado (ignorado no Git)
+47: ├── src/
+48: │   ├── config.py          loader do .env + helpers (bool/int)
+49: │   ├── database.py        LeadDatabase: leads, templates_whatsapp, UPSERT, Excel, log WAHA
+50: │   ├── localidades_db.py  cache IBGE em DuckDB (tabelas localidades_*)
+51: │   ├── locations.py       IBGE + OSM + cache; sync e aquecimento por UF
+52: │   ├── scraper.py         Playwright, multithread, anti-captcha
+53: │   ├── utils.py           formatar_telefone → (telefone, tipo, link wa)
+54: │   ├── whatsapp.py        envio via WAHA
+55: │   └── main.py            menu interativo
+56: ├── .env / .env.example
+57: ├── requirements.txt
+58: └── README.md
+59: ```
 60: 
-61: | Versionado | Ignorado |
-62: |---|---|
-63: | `data/leads.duckdb` | `.env` (segredos) |
-64: | `src/`, `memory/`, `README.md` | `*.duckdb.wal`, `*.duckdb.tmp` |
-65: | `.env.example` | `*.xlsx`, `*.csv`, `*.log` |
-66: | | `venv/`, `__pycache__/`, `sessions/` |
-67: 
-68: Comando de sync usado pelo mantenedor (sobrescreve o remoto):
+61: ## Git — o que é versionado
+62: 
+63: | Versionado | Ignorado |
+64: |---|---|
+65: | `data/leads.duckdb` | `.env` (segredos) |
+66: | `src/`, `memory/`, `README.md` | `*.duckdb.wal`, `*.duckdb.tmp` |
+67: | `.env.example` | `*.xlsx`, `*.csv`, `*.log` |
+68: | | `venv/`, `__pycache__/`, `sessions/` |
 69: 
-70: ```powershell
-71: git add -A; git commit -m "sync local $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
-72: ```
-````
+70: Comando de sync usado pelo mantenedor (sobrescreve o remoto):
+71: 
+72: ```powershell
+73: git add -A; git commit -m "sync local $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
+74: ```
+`````
 
 ## File: memory/01-arquitetura-e-modulos.md
-````markdown
+`````markdown
   1: # 01 — Arquitetura e Módulos
   2: 
   3: Todos os módulos usam imports absolutos (`from src.x import y`). `src/main.py`
@@ -308,51 +507,88 @@ requirements.txt
 165: ```
 166: nome, telefone, tipo_telefone, whatsapp_link, instagram, site,
 167: bairro, cidade, estado, nicho, status (default 'ativo'),
-168: data_extracao, data_envio_whatsapp, status_whatsapp (default 'pendente')
-169: ```
-170: 
-171: ```python
-172: save_leads(df) -> int          # filtra descartados, UPSERT, não apaga log WAHA
-173: get_leads_para_envio(limite)   # ativo + Celular + pendente
-174: marcar_envio(nome, cidade, status_whatsapp)   # 'enviado' grava data
-175: export_to_excel(nicho, cidade) # output/leads_{nicho}_{cidade}.xlsx
-176: close()
+168: data_extracao, data_envio_whatsapp, status_whatsapp (default 'pendente'),
+169: chat_id_waha
+170: ```
+171: 
+172: - `chat_id_waha`: cache do chatId resolvido pela WAHA (ex.: `143172869029943@lid`).
+173:   Preenchido na primeira resolução; evita chamar `/api/checkNumberStatus` de novo.
+174: 
+175: Tabela `templates_whatsapp` (criada e seedada no `__init__`):
+176: 
 177: ```
-178: 
-179: ---
+178: id INTEGER PK, mensagem, descricao, ativo BOOLEAN (default TRUE)
+179: ```
 180: 
-181: ## src/whatsapp.py — WAHA
+181: - Seed idempotente do template "Apresentação Agendamento Já" (`id=1`).
 182: 
 183: ```python
-184: WAHA_API_URL, WAHA_API_KEY, WAHA_SESSION
-185: WAHA_ATIVO, SOMENTE_ENVIO, WAHA_INTERVALO, WAHA_LIMITE
-186: MENSAGEM_PADRAO
-187: enviar_texto_waha(chat_id, texto, ...)   # POST /api/sendText
-188: disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None)
-189: ```
-190: 
-191: - `chat_id` = `55DDD9XXXXXXXX@c.us` (só 11 dígitos; fixo é rejeitado).
-192: - Placeholders: `{nome}`, `{bairro}`, `{cidade}`.
-193: - `SOMENTE_ENVIO=true` (ou `--so-enviar`) pula o menu e vai direto ao envio.
-194: 
-195: ---
-196: 
-197: ## src/main.py — menu
+184: save_leads(df) -> int          # filtra descartados, UPSERT, não apaga log WAHA
+185: get_leads_para_envio(limite=None, numero=None, cidade=None, nicho=None)
+186:                                # ativo + Celular + pendente; filtros opcionais
+187: marcar_envio(nome, cidade, status_whatsapp)   # 'enviado' grava data
+188: salvar_chat_id_waha(nome, cidade, chat_id)    # cacheia o chatId resolvido
+189: listar_templates_ativos()      # [{id, mensagem, descricao, ativo}]
+190: export_to_excel(nicho, cidade) # output/leads_{nicho}_{cidade}.xlsx
+191: close()
+192: ```
+193: 
+194: - `get_leads_para_envio`: `numero` compara por dígitos (regex `[^0-9]` removido),
+195:   aceita parte do número; `cidade`/`nicho` são match exato.
+196: - `save_leads` **preserva** `status`, `data_envio_whatsapp`, `status_whatsapp` e
+197:   `chat_id_waha` no re-UPSERT (não sobrescreve log de envio nem o chatId).
 198: 
-199: ```
-200: 1 - Coletar leads
-201: 2 - Enviar mensagens WhatsApp
-202: 3 - Sincronizar base de localidades (IBGE)
-203: 4 - Aquecer bairros de uma UF (OpenStreetMap)
-204: 5 - Sair
-205: ```
-206: 
-207: `coletar_leads()`: UF → cidade (filtro sem acento) → **confirma no IBGE e usa o
-208: nome oficial** → nicho → termos → "Ver navegador?" → scraping → Excel.
-````
+199: ---
+200: 
+201: ## src/whatsapp.py — WAHA
+202: 
+203: ```python
+204: WAHA_API_URL, WAHA_API_KEY, WAHA_SESSION
+205: WAHA_ATIVO, SOMENTE_ENVIO, WAHA_INTERVALO, WAHA_LIMITE
+206: MENSAGEM_PADRAO
+207: _normalizar_chatid(telefone)            # 55DDDNUMERO@c.us (clássico)
+208: _resolver_chatid_waha(telefone, ...)    # GET /api/checkNumberStatus → @lid ou @c.us
+209: _limpar_markdown_whatsapp(texto)        # **negrito** → texto; [r](u) → u
+210: _renderizar_mensagem(template, lead)    # placeholders + limpa markdown
+211: enviar_texto_waha(chat_id, texto, ...)  # POST /api/sendText
+212: enviar_texto_numero(numero, texto, ...) # resolve chatId e envia (p/ teste)
+213: disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None)
+214: ```
+215: 
+216: - **chatId:** números recentes usam `@lid`; enviar `@c.us` para eles retorna
+217:   **HTTP 500**. `_resolver_chatid_waha` consulta `/api/checkNumberStatus`
+218:   (`?session=&phone=55DDD9XXXXXXXX`) e usa o `chatId` retornado; fallback `@c.us`.
+219: - `disparar_campanha` aceita `leads` (DataFrame já filtrado). Se recebido, **não**
+220:   reconsulta o banco — respeita os filtros aplicados pelo menu.
+221: - O chatId resolvido é **cacheado** via `db.salvar_chat_id_waha` (só resolve na
+222:   primeira vez; reenvios pulam o checkNumberStatus).
+223: - Placeholders: `{nome}`, `{bairro}`, `{cidade}`.
+224: - `SOMENTE_ENVIO=true` (ou `--so-enviar`) pula o menu e vai direto ao envio.
+225: 
+226: ---
+227: 
+228: ## src/main.py — menu
+229: 
+230: ```
+231: 1 - Coletar leads
+232: 2 - Enviar mensagens WhatsApp
+233: 3 - Sincronizar base de localidades (IBGE)
+234: 4 - Aquecer bairros de uma UF (OpenStreetMap)
+235: 5 - Sair
+236: ```
+237: 
+238: `coletar_leads()`: UF → cidade (filtro sem acento) → **confirma no IBGE e usa o
+239: nome oficial** → nicho → termos → "Ver navegador?" → scraping → Excel.
+240: 
+241: `enviar_whatsapp_menu()`: escolhe **template ativo** → aplica **filtros de envio**
+242: (0 todos / 1 por número / 2 por cidade / 3 por nicho) → pergunta se quer
+243: **teste de envio** (digitar número ou escolher um lead pendente) → lista os
+244: pendentes filtrados e confirma o disparo. Helpers: `_confirmar`,
+245: `_escolher_template`, `_escolher_filtros`, `testar_envio`.
+`````
 
 ## File: memory/02-decisoes-e-armadilhas.md
-````markdown
+`````markdown
   1: # 02 — Decisões Técnicas e Armadilhas
   2: 
   3: Leia antes de mexer no código. Cada item já custou tempo de depuração.
@@ -472,231 +708,72 @@ requirements.txt
 117: 
 118: ---
 119: 
-120: ## `.env` e Git
+120: ## WAHA: chatId `@c.us` vs `@lid` (HTTP 500)
 121: 
-122: - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.
-123: - Formato: `CHAVE=VALOR`. Comentários só em **linha própria** — comentário na
-124:   mesma linha vira parte do valor (`WAHA_LIMITE= # vazio` → `" # vazio"`).
-125: - Não use `export`/aspas desnecessárias; o loader tira aspas simples/duplas.
-126: - Nunca imprima nem comite segredos.
-127: 
-128: ---
-129: 
-130: ## Scraping: seletores frágeis
-131: 
-132: Dependem do DOM do Google Maps (podem mudar sem aviso):
-133: 
-134: | Dado | Seletor |
-135: |---|---|
-136: | lista de resultados | `div[role="feed"]` |
-137: | links de perfis | `a[href*="/maps/place/"]` |
-138: | nome | `h1` (ignora "Resultados" e vazio) |
-139: | endereço | `button[data-item-id="address"]` (`aria-label`) |
-140: | telefone | `button[data-item-id^="phone:tel:"]` (`aria-label`) |
-141: | site | `a[data-item-id="authority"]` |
-142: | Instagram | primeiro `a[href]` contendo `instagram.com` |
-143: 
-144: Bairro é extraído do endereço: `"Rua X, 123 - Bairro, Cidade - UF"` → parte
-145: entre `" - "` e `","`. Se não casar, `"Não Informado"`.
-146: 
-147: ---
-148: 
-149: ## Concorrência
-150: 
-151: - `save_callback` é chamado **na thread principal** (dentro do loop de
-152:   `as_completed`), então não há escrita concorrente no DuckDB.
-153: - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
-154: - `lock` protege a lista `vistos`/`todos_leads`.
-155: 
-156: ---
-157: 
-158: ## Coisas que parecem bug mas não são
-159: 
-160: - `"IBGE não publica bairros para X"` → cidade com 1 distrito (ver acima).
-161: - `"Base local ... sem bairros (fonte: cidade)"` → já tentou, o OSM não tinha nada.
-162: - `"LOCALIDADES_SALVAR=false: a base local não será alterada"` → modo leitura.
-163: - `"Aviso: base local ... indisponível (arquivo em uso)"` → feche o DBeaver.
-````
-
-## File: memory/04-como-contribuir.md
-````markdown
- 1: # 04 — Como Contribuir: Padrões e Boas Práticas
- 2: 
- 3: Este documento detalha os padrões de código, estilo e comunicação esperados
- 4: para novas contribuições, visando manter a consistência e facilitar a manutenção.
- 5: 
- 6: ---
- 7: 
- 8: ## 1. Organização de Código e Nomenclatura
- 9: 
-10: - **Imports:** Sempre absolutos, começando da raiz `src/`. Ex: `from src.config import ...`.
-11: - **Constantes:** `MAIUSCULAS_COM_UNDERLINE`.
-12: - **Funções privadas (internas ao módulo):** `_nome_da_funcao_privada` (com underscore inicial).
-13: - **Variáveis locais:** `snake_case`.
-14: - **Classes:** `CamelCase`.
-15: - **Parâmetros de função:** `snake_case`.
-16: 
-17: ---
-18: 
-19: ## 2. Logs e Interação com o Usuário
-20: 
-21: - **Prints de progresso:** Use `print(f"[{area_da_busca}] Mensagem...")`.
-22:   O `[área]` (ex: `[Canoas-RS]`, `[Assis Brasil]`) ajuda a identificar qual thread
-23:   ou cidade está processando no momento.
-24: - **Mensagens de erro:** Inclua `type(e).__name__` e `str(e)[:N]` para facilitar
-25:   a depuração em ambientes remotos ou com logs limitados.
-26: - **Interação:** Use `input()` para entradas do usuário no console. Evite `print()`
-27:   seguido de `input()` em linhas separadas para prompts, a menos que seja intencional.
-28: - **Mensagens para o usuário:** Devem ser claras e úteis, preferencialmente
-29:   em português (padrão atual do projeto).
-30: 
-31: ---
-32: 
-33: ## 3. Variáveis de Ambiente e Configuração
-34: 
-35: - **Todas as configurações** devem ser lidas do `.env` via `src/config.py`.
-36: - **Nunca faça hardcode** de URLs de APIs, chaves, limites, etc.
-37: - **Novas variáveis:** Adicione ao `.env.example` com comentários explicativos.
-38: - **Semântica:** Use `true`/`false` para booleanos, números para inteiros.
-39:   O `src/config.py` já tem helpers para isso (`str_para_bool`, `env_int`).
-40: 
-41: ---
-42: 
-43: ## 4. Testes e Validação
-44: 
-45: - **Testes unitários/de integração:** Idealmente, adicione pequenos scripts de
-46:   validação (como os que o modelo Gemini tem feito) para cobrir novas features
-47:   ou refatorações.
-48: - **DuckDB:** Para testes que não devem tocar no banco real, use um arquivo
-49:   DuckDB temporário (`tempfile.gettempdir()`) e defina `localidades_db.DB_PATH_PADRAO`.
-50: - **Encoding:** Mantenha os arquivos em **UTF-8 sem BOM**.
-51:   Valide a acentuação após edições em lote: procure caracteres de dupla
-52:   codificação (por exemplo, `A` com til U+00C3 seguido de símbolo de moeda).
-53: 
-54: ---
-55: 
-56: ## 5. Documentação
-57: 
-58: - **`README.md` (raiz):** Manual do usuário, instalação, execução, fluxo geral.
-59: - **`memory/`:** Resumos densos para modelos de IA. **Atualize ao mudar comportamento**.
-60:   - `00-resumo-projeto.md`: alto nível.
-61:   - `01-arquitetura-e-modulos.md`: detalhe de cada módulo.
-62:   - `02-decisoes-e-armadilhas.md`: o "porquê" das decisões, bugs conhecidos.
-63:   - `03-historico-de-mudancas.md`: log recente das mudanças importantes.
-64: - **Docstrings:** Use docstrings Python para explicar funções e classes.
-65: - **Comentários de código:** Breves e pontuais, explicando lógica complexa ou escolhas não óbvias.
-````
-
-## File: src/__init__.py
-````python
-1: 
-````
-
-## File: src/config.py
-````python
- 1: # src/config.py
- 2: """Carregamento centralizado do arquivo .env e leitura de flags.
- 3: 
- 4: Todos os módulos importam este arquivo, então o `.env` é lido uma única vez
- 5: por processo, antes de qualquer constante de configuração ser calculada.
- 6: """
- 7: import os
- 8: 
- 9: PROJETO_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-10: CAMINHO_ENV = os.path.join(PROJETO_RAIZ, ".env")
-11: 
-12: 
-13: def carregar_env(caminho=None):
-14:     """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
-15: 
-16:     Não sobrescreve variáveis que já existem no ambiente. Ignora linhas em
-17:     branco, comentários (#) e valores entre aspas.
-18:     """
-19:     caminho = caminho or CAMINHO_ENV
-20:     if not os.path.isfile(caminho):
-21:         return
-22: 
-23:     with open(caminho, "r", encoding="utf-8-sig") as arquivo:
-24:         for linha in arquivo:
-25:             linha = linha.strip()
-26:             if not linha or linha.startswith("#") or "=" not in linha:
-27:                 continue
-28:             chave, _, valor = linha.partition("=")
-29:             chave = chave.strip()
-30:             valor = valor.strip().strip('"').strip("'")
-31:             if chave and chave not in os.environ:
-32:                 os.environ[chave] = valor
-33: 
-34: 
-35: def str_para_bool(valor, padrao=False):
-36:     """Converte strings comuns de booleano ('true', '1', 'sim', 's', 'yes') em bool."""
-37:     if valor is None:
-38:         return padrao
-39:     return str(valor).strip().lower() in ("1", "true", "yes", "s", "sim", "on")
-40: 
-41: 
-42: def env_int(nome, padrao):
-43:     """Lê uma variável de ambiente inteira, com fallback para o padrão."""
-44:     valor = os.environ.get(nome, "").strip()
-45:     if not valor:
-46:         return padrao
-47:     try:
-48:         return int(float(valor))
-49:     except ValueError:
-50:         return padrao
-51: 
-52: 
-53: # Lido no import: qualquer módulo que importe `src.config` já tem o .env aplicado.
-54: carregar_env()
-````
-
-## File: src/utils.py
-````python
- 1: # src/utils.py
- 2: import re
- 3: 
- 4: def formatar_telefone(telefone_bruto):
- 5:     """
- 6:     Limpa o telefone, identifica o tipo e gera o link do WhatsApp.
- 7:     Retorna: (telefone_limpo, tipo, whatsapp_link)
- 8:     """
- 9:     if not telefone_bruto:
-10:         return "", "Não Informado", ""
-11:     
-12:     # Remove tudo que não for número
-13:     apenas_numeros = re.sub(r'\D', '', str(telefone_bruto))
-14:     
-15:     # Se o número já vier com DDI (55) e tiver 12 ou 13 dígitos, removemos o 55 
-16:     # temporariamente para classificar o tipo corretamente (Fixo/Celular)
-17:     if apenas_numeros.startswith('55') and len(apenas_numeros) > 11:
-18:         numero_sem_ddi = apenas_numeros[2:]
-19:     else:
-20:         numero_sem_ddi = apenas_numeros
-21: 
-22:     # Classificação e formatação do Link
-23:     if len(numero_sem_ddi) == 11: # Celular com 9 dígito
-24:         tipo = "Celular"
-25:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
-26:     elif len(numero_sem_ddi) == 10: # Fixo
-27:         tipo = "Fixo"
-28:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
-29:     elif len(apenas_numeros) > 0:
-30:         tipo = "Desconhecido"
-31:         whatsapp_link = f"https://wa.me/{apenas_numeros}"
-32:     else:
-33:         return "", "Não Informado", ""
-34:         
-35:     # Retorna apenas os números na coluna telefone, o tipo e o link pronto
-36:     return apenas_numeros, tipo, whatsapp_link
-````
-
-## File: .gitkeep
-````
-1: 
-````
+122: Enviar `POST /api/sendText` com `chatId = 55DDDNUMERO@c.us` **falha com HTTP 500**
+123: para números recentes do WhatsApp. Esses números foram migrados para o formato
+124: **`@lid`** (hidden user ID).
+125: 
+126: - Diagnóstico: `GET /api/checkNumberStatus?session=default&phone=55DDD9XXXXXXXX`
+127:   responde `{"numberExists": true, "chatId": "143172869029943@lid"}`.
+128: - Correção: **sempre resolver o chatId via `checkNumberStatus` antes de enviar**,
+129:   em vez de montar `@c.us` na mão (é o que a documentação da WAHA recomenda para
+130:   números brasileiros).
+131: - O chatId resolvido é **cacheado** na coluna `leads.chat_id_waha` — a consulta
+132:   extra só acontece uma vez por lead.
+133: - ⚠️ O payload do `sendText` está correto (`{session, chatId, text}` + header
+134:   `X-Api-Key`); o erro 500 era **só** o formato do `chatId`, não o endpoint.
+135: 
+136: ---
+137: 
+138: ## `.env` e Git
+139: 
+140: - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.
+141: - Formato: `CHAVE=VALOR`. Comentários só em **linha própria** — comentário na
+142:   mesma linha vira parte do valor (`WAHA_LIMITE= # vazio` → `" # vazio"`).
+143: - Não use `export`/aspas desnecessárias; o loader tira aspas simples/duplas.
+144: - Nunca imprima nem comite segredos.
+145: 
+146: ---
+147: 
+148: ## Scraping: seletores frágeis
+149: 
+150: Dependem do DOM do Google Maps (podem mudar sem aviso):
+151: 
+152: | Dado | Seletor |
+153: |---|---|
+154: | lista de resultados | `div[role="feed"]` |
+155: | links de perfis | `a[href*="/maps/place/"]` |
+156: | nome | `h1` (ignora "Resultados" e vazio) |
+157: | endereço | `button[data-item-id="address"]` (`aria-label`) |
+158: | telefone | `button[data-item-id^="phone:tel:"]` (`aria-label`) |
+159: | site | `a[data-item-id="authority"]` |
+160: | Instagram | primeiro `a[href]` contendo `instagram.com` |
+161: 
+162: Bairro é extraído do endereço: `"Rua X, 123 - Bairro, Cidade - UF"` → parte
+163: entre `" - "` e `","`. Se não casar, `"Não Informado"`.
+164: 
+165: ---
+166: 
+167: ## Concorrência
+168: 
+169: - `save_callback` é chamado **na thread principal** (dentro do loop de
+170:   `as_completed`), então não há escrita concorrente no DuckDB.
+171: - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
+172: - `lock` protege a lista `vistos`/`todos_leads`.
+173: 
+174: ---
+175: 
+176: ## Coisas que parecem bug mas não são
+177: 
+178: - `"IBGE não publica bairros para X"` → cidade com 1 distrito (ver acima).
+179: - `"Base local ... sem bairros (fonte: cidade)"` → já tentou, o OSM não tinha nada.
+180: - `"LOCALIDADES_SALVAR=false: a base local não será alterada"` → modo leitura.
+181: - `"Aviso: base local ... indisponível (arquivo em uso)"` → feche o DBeaver.
+`````
 
 ## File: .repomixignore
-````
+`````
  1: # Add patterns to ignore here, one per line
  2: # Example:
  3: # *.log
@@ -709,10 +786,10 @@ requirements.txt
 10: # Ignorar arquivos gerados pelo próprio Repomix
 11: repomix-output.md
 12: repomix-output.xml
-````
+`````
 
 ## File: repomix-instrucao.md
-````markdown
+`````markdown
  1: # Instruções Mestras para o Assistente de IA (Map Scraper Project)
  2: 
  3: ## 1. Persona e Idioma
@@ -740,10 +817,10 @@ requirements.txt
 25: - Não sugira refatorações massivas (reescrever o projeto inteiro) sem que seja explicitamente pedido.
 26: - Não adicione bibliotecas externas pesadas se a biblioteca padrão do Python ou as dependências atuais (Pandas, Playwright, DuckDB) já resolverem o problema.
 27: - Não ignore a estrutura de pastas atual (`src/`, `data/`, `output/`, `memory/`).
-````
+`````
 
 ## File: repomix.config.json
-````json
+`````json
  1: {
  2:   "$schema": "https://repomix.com/schemas/latest/schema.json",
  3:   "input": {
@@ -789,147 +866,10 @@ requirements.txt
 43:     "encoding": "o200k_base"
 44:   }
 45: }
-````
-
-## File: requirements.txt
-````
-1: pandas
-2: openpyxl
-3: instagpy
-4: pip-system-certs
-5: playwright
-6: chromium
-7: geopy
-8: duckdb
-9: requests
-````
-
-## File: memory/03-historico-de-mudancas.md
-````markdown
-  1: # 03 — Histórico de Mudanças
-  2: 
-  3: Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
-  4: 
-  5: ---
-  6: 
-  7: ## 2026-10-29
-  8: 
-  9: ### Memória do projeto para IA
- 10: 
- 11: - Criada a pasta `memory/` com documentação densa para reduzir custo de contexto.
- 12: - Arquivos: `README.md`, `00-resumo-projeto.md`, `01-arquitetura-e-modulos.md`,
- 13:   `02-decisoes-e-armadilhas.md`, `03-historico-de-mudancas.md`,
- 14:   `04-como-contribuir.md` (padrões de código, logs, config, testes e docs).
- 15: - `README.md` limpo: removido o bloco "env temp:" (dump cru do `.env`) e
- 16:   adicionadas as seções 12 (memória para IA) e 13 (observação sobre configuração).
- 17: 
- 18: ### Correção: cache de bairros ignorado (`bairros_fonte`)
- 19: 
- 20: - **Sintoma:** com `LOCALIDADES_USAR_CACHE=true` e base populada, a coleta ainda
- 21:   consultava IBGE e Overpass.
- 22: - **Causa:** `localidades_db.ler_municipios()` não retornava `bairros_fonte`;
- 23:   `_resolver_municipio` repassava `None`, então o cache nunca era considerado.
- 24: - **Correção:** query passou a trazer `uf` e `bairros_fonte`; o resolver repassa
- 25:   o valor real.
- 26: - **Teste:** com as funções de rede trocadas por `AssertionError`, os bairros de
- 27:   Canoas (fonte `overpass`) e Bento Gonçalves (fonte `ibge`) vieram do banco.
- 28: 
- 29: ### Nome oficial do município (IBGE) na coleta
- 30: 
- 31: - `obter_municipio(cidade, uf)` confirma o município e devolve `id_municipio`,
- 32:   `nome` oficial e `uf`.
- 33: - `filtrar_cidades(cidades, termo)` compara **sem acento e sem caixa**:
- 34:   `canoas`, `sao leopoldo`, `CHAPECO` funcionam.
- 35: - `main.coletar_leads()` passa a usar o nome oficial no scraping, no banco e no
- 36:   nome do Excel, e imprime `Município (IBGE): Canoas-RS | código 4304606`.
- 37: - Lista de municípios **memoizada** por execução (`_municipios_da_uf`), evitando
- 38:   rebaixar a lista da UF a cada cidade (principalmente com `SALVAR=false`).
- 39: 
- 40: ### Mensagens de bairros mais honestas
- 41: 
- 42: - Antes: `IBGE retornou 0 distrito(s) útil(eis)`.
- 43: - Agora: `IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).`
- 44: - Motivo: a API de Localidades do IBGE **não tem bairros** (só distritos).
- 45: 
- 46: ### Aquecimento de bairros por UF (menu 4)
- 47: 
- 48: - `locations.aquecer_bairros_uf(uf, cidades=None, max_cidades=0, pausa_segundos=None)`.
- 49: - `localidades_db.ler_municipios_pendentes(uf)` → só `bairros_fonte IS NULL`.
- 50: - Retoma de onde parou; `Ctrl+C` preserva o que já foi gravado.
- 51: - Pausa (`AQUECER_PAUSA_SEGUNDOS`, default 2) só quando a cidade usou o OSM.
- 52: - Falha de rede não grava nada (`falhas` no resumo) e a cidade continua pendente.
- 53: - Bloqueado quando `LOCALIDADES_SALVAR=false`.
- 54: - Medido: AC 21 → 18 → 17 pendentes; SP 621 → 616.
- 55: 
- 56: ### Flag `LOCALIDADES_SALVAR`
- 57: 
- 58: - `false` = somente leitura: nenhuma escrita, **nem criação de tabelas**
- 59:   (`localidades_db.CRIAR_TABELAS = False`) e menus 3/4 desativados.
- 60: - Todas as escritas passam por `_salvar()`, que respeita a flag.
- 61: - Aviso único por execução para não poluir o log.
- 62: 
- 63: ### `.env` e `.env.example` comentados
- 64: 
- 65: - Cada variável com explicação, faixa de valores e efeito colateral.
- 66: - Tabela das 4 combinações `USAR_CACHE × SALVAR`.
- 67: - Regra explícita: comentário só em linha própria.
- 68: - Valores locais preservados (`USAR_CACHE=false` → depois `true`).
- 69: 
- 70: ### Base de localidades offline (IBGE) — menu 3
- 71: 
- 72: - Novo `src/localidades_db.py` com tabelas `localidades_estados`,
- 73:   `localidades_municipios`, `localidades_bairros` no mesmo `leads.duckdb`.
- 74: - `src/config.py` centraliza o loader do `.env` (antes duplicado no `whatsapp.py`).
- 75: - `src/locations.py` reescrito: cache → API → grava.
- 76: - Sync nacional: 27 estados, 5.571 municípios, 10.751 distritos; 643 cidades com
- 77:   bairros prontos pelo IBGE.
- 78: - Fallback OSM por cidade, gravado uma única vez.
- 79: 
- 80: ### Anti-captcha / bloqueio do Google Maps
- 81: 
- 82: - Detecção por URL `/sorry/`, seletores de captcha e textos ("tráfego incomum").
- 83: - Retry com pausa longa (`CAPTCHA_PAUSA_SEGUNDOS`) e **cooldown global**
- 84:   (`CAPTCHA_PAUSA_GLOBAL_SEGUNDOS`) entre todas as threads.
- 85: - Bloqueio persistente → aborta a área e **preserva os leads já extraídos**.
- 86: - Testado com Playwright real: página normal passa, página de captcha levanta
- 87:   `BloqueioDetectado` após `CAPTCHA_MAX_TENTATIVAS`.
- 88: 
- 89: ### Correção: menu não aparecia
- 90: 
- 91: - `src/main.py` definia `menu_interativo()` mas **nunca chamava**.
- 92: - Adicionado `if __name__ == "__main__": menu_interativo()`.
- 93: 
- 94: ### Banco DuckDB versionado
- 95: 
- 96: - `data/leads.duckdb` passou a ser versionado no Git.
- 97: - `.gitignore`: removidos `data/` e `*.duckdb` da lista de ignore; adicionados
- 98:   `*.duckdb.wal` e `*.duckdb.tmp`.
- 99: - `*.xlsx`, `*.csv`, `*.log` continuam ignorados (confirmado com
-100:   `git check-ignore` e `git ls-files`).
-101: - ⚠️ Comitar com o programa aberto sobe o `.duckdb` sem o `.wal` (dados
-102:   desatualizados). Fechar antes.
-103: 
-104: ---
-105: 
-106: ## Pendências / próximos passos
-107: 
-108: | Item | Status |
-109: |---|---|
-110: | Bairros oficiais via CNEFE 2022 | **Não implementar por hora** (decisão do mantenedor) |
-111: | Resolução automática de captcha (2Captcha/CapMonster) | Não implementado; hoje pausa e desiste da área |
-112: | Enriquecimento de e-mail a partir dos sites | Não iniciado |
-113: | Base de bairros offline nacional | Coberto parcialmente pelo IBGE (643 cidades) |
-114: 
-115: ## Problemas conhecidos (ambiente)
-116: 
-117: - **DBeaver aberto trava o DuckDB** → cache cai para as APIs.
-118: - **Overpass/Nominatim instáveis** (502, timeout) → aquecimento por UF precisa de
-119:   paciência e retomadas.
-120: - Interprete global do mantenedor é Python 3.15; **usar `venv\Scripts\python.exe`**.
-````
+`````
 
 ## File: memory/README.md
-````markdown
+`````markdown
  1: # memory/ — Memória do Projeto para IAs
  2: 
  3: Esta pasta contém documentação **resumida e densa** sobre o projeto Map Scraper,
@@ -962,282 +902,21 @@ requirements.txt
 30: 
 31: - `README.md` (raiz) — manual do usuário, instalação, uso.
 32: - `.env.example` — valores e comentários de cada variável.
-````
-
-## File: src/database.py
-````python
-  1: # src/database.py
-  2: import duckdb
-  3: import pandas as pd
-  4: import os
-  5: from datetime import datetime
-  6: 
-  7: class LeadDatabase:
-  8:     def __init__(self, db_path="data/leads.duckdb"):
-  9:         os.makedirs(os.path.dirname(db_path), exist_ok=True)
- 10:         self.db_path = db_path
- 11:         self.conn = duckdb.connect(self.db_path)
- 12:         self._create_table()
- 13:         self._ensure_whatsapp_columns()
- 14: 
- 15:     def _create_table(self):
- 16:         self.conn.execute("""
- 17:             CREATE TABLE IF NOT EXISTS leads (
- 18:                 nome VARCHAR,
- 19:                 telefone VARCHAR,
- 20:                 tipo_telefone VARCHAR,
- 21:                 whatsapp_link VARCHAR,
- 22:                 instagram VARCHAR,
- 23:                 site VARCHAR,
- 24:                 bairro VARCHAR,
- 25:                 cidade VARCHAR,
- 26:                 estado VARCHAR,
- 27:                 nicho VARCHAR,
- 28:                 status VARCHAR DEFAULT 'ativo',
- 29:                 data_extracao TIMESTAMP,
- 30:                 data_envio_whatsapp TIMESTAMP,
- 31:                 status_whatsapp VARCHAR DEFAULT 'pendente',
- 32:                 PRIMARY KEY (nome, cidade)
- 33:             )
- 34:         """)
- 35: 
- 36:     def _ensure_whatsapp_columns(self):
- 37:         """Adiciona as colunas de log de WhatsApp em bancos criados antes da migração."""
- 38:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
- 39:         if 'data_envio_whatsapp' not in colunas:
- 40:             self.conn.execute("ALTER TABLE leads ADD COLUMN data_envio_whatsapp TIMESTAMP")
- 41:         if 'status_whatsapp' not in colunas:
- 42:             self.conn.execute("ALTER TABLE leads ADD COLUMN status_whatsapp VARCHAR DEFAULT 'pendente'")
- 43: 
- 44:     def save_leads(self, df: pd.DataFrame):
- 45:         if df.empty:
- 46:             return 0
- 47:         
- 48:         descartados_db = self.conn.execute("SELECT nome, cidade FROM leads WHERE status = 'descartado'").fetchall()
- 49:         descartados_set = set(descartados_db)
- 50:         
- 51:         df = df[~df.apply(lambda row: (row['nome'], row['cidade']) in descartados_set, axis=1)]
- 52:         
- 53:         if df.empty:
- 54:             print("Todos os leads coletados já foram descartados anteriormente. Pulando salvamento.")
- 55:             return 0
- 56:             
- 57:         df['data_extracao'] = datetime.now()
- 58:         
- 59:         if 'status' not in df.columns:
- 60:             df['status'] = 'ativo'
- 61: 
- 62:         self.conn.register('df_temp', df)
- 63: 
- 64:         # UPSERT preservando o status atual e as colunas de log do WhatsApp.
- 65:         # Assim, re-raspar um lead já enviado NÃO apaga data_envio_whatsapp/status_whatsapp.
- 66:         self.conn.execute("""
- 67:             INSERT INTO leads (nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao)
- 68:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao
- 69:             FROM df_temp
- 70:             ON CONFLICT (nome, cidade) DO UPDATE SET
- 71:                 telefone = excluded.telefone,
- 72:                 tipo_telefone = excluded.tipo_telefone,
- 73:                 whatsapp_link = excluded.whatsapp_link,
- 74:                 instagram = excluded.instagram,
- 75:                 site = excluded.site,
- 76:                 bairro = excluded.bairro,
- 77:                 estado = excluded.estado,
- 78:                 nicho = excluded.nicho,
- 79:                 data_extracao = excluded.data_extracao
- 80:         """)
- 81: 
- 82:         self.conn.unregister('df_temp')
- 83:         return len(df)
- 84: 
- 85:     def get_leads_para_envio(self, limite=None):
- 86:         """Retorna leads ativos, celulares e ainda não enviados (evita spam/fixo)."""
- 87:         query = """
- 88:             SELECT nome, telefone, whatsapp_link, bairro, cidade, estado, nicho
- 89:             FROM leads
- 90:             WHERE status = 'ativo'
- 91:               AND tipo_telefone = 'Celular'
- 92:               AND (status_whatsapp IS NULL OR status_whatsapp = 'pendente')
- 93:             ORDER BY cidade, bairro, nome
- 94:         """
- 95:         if limite:
- 96:             query += f" LIMIT {int(limite)}"
- 97:         return self.conn.execute(query).df()
- 98: 
- 99:     def marcar_envio(self, nome, cidade, status_whatsapp):
-100:         """Registra o resultado do envio. 'data_envio_whatsapp' é gravado apenas no sucesso."""
-101:         if status_whatsapp == 'enviado':
-102:             self.conn.execute("""
-103:                 UPDATE leads
-104:                 SET status_whatsapp = ?, data_envio_whatsapp = ?
-105:                 WHERE nome = ? AND cidade = ?
-106:             """, [status_whatsapp, datetime.now(), nome, cidade])
-107:         else:
-108:             self.conn.execute("""
-109:                 UPDATE leads
-110:                 SET status_whatsapp = ?
-111:                 WHERE nome = ? AND cidade = ?
-112:             """, [status_whatsapp, nome, cidade])
-113: 
-114:     def export_to_excel(self, nicho: str, cidade: str):
-115:         df = self.conn.execute("""
-116:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, data_extracao 
-117:             FROM leads 
-118:             WHERE nicho = ? AND cidade = ? AND status = 'ativo'
-119:             ORDER BY bairro, nome
-120:         """, [nicho, cidade]).df()
-121:         
-122:         if df.empty:
-123:             print("Nenhum dado ativo para exportar.")
-124:             return
-125:             
-126:         os.makedirs("output", exist_ok=True)
-127:         nome_arquivo = f"output/leads_{nicho}_{cidade}.xlsx".replace(" ", "_").lower()
-128:         df.to_excel(nome_arquivo, index=False)
-129:         print(f"🎉 Exportação concluída: {nome_arquivo} ({len(df)} leads ativos)")
-130: 
-131:     def close(self):
-132:         self.conn.close()
-````
-
-## File: src/whatsapp.py
-````python
-  1: # src/whatsapp.py
-  2: """Integração com a WAHA (WhatsApp HTTP API) para envio de mensagens aos leads.
-  3: 
-  4: Configuração via variáveis de ambiente:
-  5:     WAHA_API_URL   -> URL base da WAHA (padrão: http://localhost:3000)
-  6:     WAHA_API_KEY   -> chave de API da WAHA (obrigatória se a instância exigir)
-  7:     WAHA_SESSION   -> nome da sessão conectada na WAHA (padrão: "default")
-  8: 
-  9: O módulo só envia para leads:
- 10:     - status = 'ativo'
- 11:     - tipo_telefone = 'Celular'  (nunca fixo)
- 12:     - ainda não enviados (status_whatsapp = 'pendente' ou NULL)
- 13: """
- 14: import os
- 15: import re
- 16: import time
- 17: 
- 18: import requests
- 19: 
- 20: from src.config import carregar_env, str_para_bool
- 21: 
- 22: carregar_env()
- 23: 
- 24: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
- 25: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
- 26: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
- 27: 
- 28: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
- 29: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
- 30: 
- 31: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
- 32: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
- 33: 
- 34: # Intervalo (segundos) entre envios e limite de leads por campanha.
- 35: # WAHA_LIMITE vazio = sem limite (envia todos os pendentes).
- 36: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
- 37: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
- 38: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
- 39: 
- 40: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
- 41: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
- 42: 
- 43: 
- 44: def _normalizar_chatid(telefone):
- 45:     """Converte o telefone salvo em um chatId do WAHA (55DDDNUMERO@c.us)."""
- 46:     numero = re.sub(r"\D", "", str(telefone or ""))
- 47:     if not numero:
- 48:         return None
- 49: 
- 50:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
- 51:     if numero.startswith("55") and len(numero) > 11:
- 52:         numero = numero[2:]
- 53: 
- 54:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
- 55:     if len(numero) != 11:
- 56:         return None
- 57: 
- 58:     return f"55{numero}@c.us"
- 59: 
- 60: 
- 61: def _renderizar_mensagem(template, lead):
- 62:     """Substitui {nome}, {bairro} e {cidade} de forma segura (sem quebrar com chaves soltas)."""
- 63:     bairro = str(lead.get("bairro") or "sua região")
- 64:     cidade = str(lead.get("cidade") or "")
- 65:     return (
- 66:         template
- 67:         .replace("{nome}", str(lead.get("nome") or ""))
- 68:         .replace("{bairro}", bairro)
- 69:         .replace("{cidade}", cidade)
- 70:     )
- 71: 
- 72: 
- 73: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
- 74:     """Envia uma mensagem de texto via WAHA."""
- 75:     session = session or WAHA_SESSION
- 76:     api_url = api_url or WAHA_API_URL
- 77:     api_key = api_key if api_key is not None else WAHA_API_KEY
- 78:     url = f"{api_url.rstrip('/')}/api/sendText"
- 79: 
- 80:     payload = {
- 81:         "session": session,
- 82:         "chatId": chat_id,
- 83:         "text": texto,
- 84:     }
- 85: 
- 86:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
- 87:     if api_key:
- 88:         headers["X-Api-Key"] = api_key
- 89: 
- 90:     response = requests.post(url, json=payload, headers=headers, timeout=30)
- 91:     response.raise_for_status()
- 92:     return response.json()
- 93: 
- 94: 
- 95: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None):
- 96:     """Envia mensagens para todos os leads celulares pendentes.
- 97: 
- 98:     - db: instância de LeadDatabase
- 99:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
-100:     - intervalo: pausa em segundos entre envios (evita spam e banimento)
-101:     """
-102:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
-103:     leads = db.get_leads_para_envio(limite)
-104: 
-105:     if leads.empty:
-106:         print("Nenhum lead celular pendente de envio.")
-107:         return
-108: 
-109:     total = len(leads)
-110:     print(f"Enviando para {total} lead(s) celular(es), com intervalo de {intervalo}s...")
-111: 
-112:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
-113:         chat_id = _normalizar_chatid(lead.get("telefone"))
-114:         if not chat_id:
-115:             db.marcar_envio(lead["nome"], lead["cidade"], "falhou")
-116:             print(f"[{i}/{total}] {lead['nome']} - telefone inválido, marcado como falhou.")
-117:             continue
-118: 
-119:         texto = _renderizar_mensagem(mensagem_template, lead)
-120: 
-121:         try:
-122:             enviar_texto_waha(chat_id, texto)
-123:             db.marcar_envio(lead["nome"], lead["cidade"], "enviado")
-124:             print(f"[{i}/{total}] ENVIADO -> {lead['nome']} ({chat_id})")
-125:         except Exception as e:
-126:             db.marcar_envio(lead["nome"], lead["cidade"], "falhou")
-127:             print(f"[{i}/{total}] FALHOU -> {lead['nome']} ({chat_id}): {e}")
-128: 
-129:         if i < total:
-130:             time.sleep(intervalo)
-131: 
-132:     print("Campanha finalizada.")
-````
+33: 
+34: ## Git force
+35: - Enviar
+36: git add -A; git commit -m "Atualização"; git push --force origin main
+37: 
+38: 
+39: ## git forçado
+40: - Envia
+41: git add -A; git commit -m "Melhorias no processo de coletas v3 $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
+42: - Recebe
+43: git fetch --all; git reset --hard origin/main
+`````
 
 ## File: src/localidades_db.py
-````python
+`````python
   1: # src/localidades_db.py
   2: """Cache local (DuckDB) da base de localidades do IBGE.
   3: 
@@ -1533,10 +1212,10 @@ requirements.txt
 293:         "bairros": bairros,
 294:         "cidades_prontas": prontas,
 295:     }
-````
+`````
 
 ## File: .env.example
-````
+`````
   1: # =============================================================================
   2: # MAP SCRAPER - arquivo de exemplo de configuração
   3: # -----------------------------------------------------------------------------
@@ -1647,10 +1326,168 @@ requirements.txt
 108: # Pausa compartilhada em SEGUNDOS aplicada a TODAS as threads assim que uma
 109: # delas detecta bloqueio (evita que as outras continuem martelando o Google).
 110: CAPTCHA_PAUSA_GLOBAL_SEGUNDOS=180
-````
+`````
+
+## File: memory/03-historico-de-mudancas.md
+`````markdown
+  1: # 03 — Histórico de Mudanças
+  2: 
+  3: Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
+  4: 
+  5: ---
+  6: 
+  7: ## 2026-10-30
+  8: 
+  9: ### Templates de mensagem de WhatsApp (tabela + markdown)
+ 10: 
+ 11: - Nova tabela `templates_whatsapp` (`id`, `mensagem`, `descricao`, `ativo`),
+ 12:   criada e seedada no `LeadDatabase.__init__` (idempotente, `id=1` =
+ 13:   "Apresentação Agendamento Já").
+ 14: - `listar_templates_ativos()` retorna só os ativos para o menu de envio.
+ 15: - `_limpar_markdown_whatsapp` remove `**negrito**` e converte `[rótulo](url)` em
+ 16:   texto plano antes do envio (o template usa markdown; o WhatsApp não renderiza).
+ 17: 
+ 18: ### Menu de envio: template + filtros + teste
+ 19: 
+ 20: - `enviar_whatsapp_menu()` agora: escolhe template → aplica filtros → pergunta se
+ 21:   quer **teste de envio** → confirma e dispara.
+ 22: - Filtros de envio (menu "FILTROS DE ENVIO"): 0 todos / 1 por número / 2 por
+ 23:   cidade / 3 por nicho. Número aceita parte e compara só dígitos.
+ 24: - `testar_envio()`: digita um número com DDD ou escolhe um lead pendente.
+ 25: - `disparar_campanha` passou a aceitar `leads` (DataFrame já filtrado) — sem isso
+ 26:   os filtros eram ignorados no disparo (ele reconsultava o banco).
+ 27: 
+ 28: ### Correção crítica: chatId `@lid` vs `@c.us` (WAHA)
+ 29: 
+ 30: - **Sintoma:** `500 Server Error` no `/api/sendText` para o número do mantenedor.
+ 31: - **Causa:** número recente usa `@lid`; enviar `@c.us` retorna HTTP 500.
+ 32: - **Correção:** `_resolver_chatid_waha` consulta `/api/checkNumberStatus` e usa o
+ 33:   chatId retornado; fallback `@c.us` para números antigos.
+ 34: - **Cache:** coluna `leads.chat_id_waha` + `salvar_chat_id_waha` — a resolução é
+ 35:   feita uma única vez por lead (menos chamadas e reenvio mais rápido).
+ 36: - `data_envio_whatsapp` continua gravada só no sucesso; `status_whatsapp` em
+ 37:   `enviado`/`falhou`.
+ 38: 
+ 39: ---
+ 40: 
+ 41: ## 2026-10-29
+ 42: 
+ 43: ### Memória do projeto para IA
+ 44: 
+ 45: - Criada a pasta `memory/` com documentação densa para reduzir custo de contexto.
+ 46: - Arquivos: `README.md`, `00-resumo-projeto.md`, `01-arquitetura-e-modulos.md`,
+ 47:   `02-decisoes-e-armadilhas.md`, `03-historico-de-mudancas.md`,
+ 48:   `04-como-contribuir.md` (padrões de código, logs, config, testes e docs).
+ 49: - `README.md` limpo: removido o bloco "env temp:" (dump cru do `.env`) e
+ 50:   adicionadas as seções 12 (memória para IA) e 13 (observação sobre configuração).
+ 51: 
+ 52: ### Correção: cache de bairros ignorado (`bairros_fonte`)
+ 53: 
+ 54: - **Sintoma:** com `LOCALIDADES_USAR_CACHE=true` e base populada, a coleta ainda
+ 55:   consultava IBGE e Overpass.
+ 56: - **Causa:** `localidades_db.ler_municipios()` não retornava `bairros_fonte`;
+ 57:   `_resolver_municipio` repassava `None`, então o cache nunca era considerado.
+ 58: - **Correção:** query passou a trazer `uf` e `bairros_fonte`; o resolver repassa
+ 59:   o valor real.
+ 60: - **Teste:** com as funções de rede trocadas por `AssertionError`, os bairros de
+ 61:   Canoas (fonte `overpass`) e Bento Gonçalves (fonte `ibge`) vieram do banco.
+ 62: 
+ 63: ### Nome oficial do município (IBGE) na coleta
+ 64: 
+ 65: - `obter_municipio(cidade, uf)` confirma o município e devolve `id_municipio`,
+ 66:   `nome` oficial e `uf`.
+ 67: - `filtrar_cidades(cidades, termo)` compara **sem acento e sem caixa**:
+ 68:   `canoas`, `sao leopoldo`, `CHAPECO` funcionam.
+ 69: - `main.coletar_leads()` passa a usar o nome oficial no scraping, no banco e no
+ 70:   nome do Excel, e imprime `Município (IBGE): Canoas-RS | código 4304606`.
+ 71: - Lista de municípios **memoizada** por execução (`_municipios_da_uf`), evitando
+ 72:   rebaixar a lista da UF a cada cidade (principalmente com `SALVAR=false`).
+ 73: 
+ 74: ### Mensagens de bairros mais honestas
+ 75: 
+ 76: - Antes: `IBGE retornou 0 distrito(s) útil(eis)`.
+ 77: - Agora: `IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).`
+ 78: - Motivo: a API de Localidades do IBGE **não tem bairros** (só distritos).
+ 79: 
+ 80: ### Aquecimento de bairros por UF (menu 4)
+ 81: 
+ 82: - `locations.aquecer_bairros_uf(uf, cidades=None, max_cidades=0, pausa_segundos=None)`.
+ 83: - `localidades_db.ler_municipios_pendentes(uf)` → só `bairros_fonte IS NULL`.
+ 84: - Retoma de onde parou; `Ctrl+C` preserva o que já foi gravado.
+ 85: - Pausa (`AQUECER_PAUSA_SEGUNDOS`, default 2) só quando a cidade usou o OSM.
+ 86: - Falha de rede não grava nada (`falhas` no resumo) e a cidade continua pendente.
+ 87: - Bloqueado quando `LOCALIDADES_SALVAR=false`.
+ 88: - Medido: AC 21 → 18 → 17 pendentes; SP 621 → 616.
+ 89: 
+ 90: ### Flag `LOCALIDADES_SALVAR`
+ 91: 
+ 92: - `false` = somente leitura: nenhuma escrita, **nem criação de tabelas**
+ 93:   (`localidades_db.CRIAR_TABELAS = False`) e menus 3/4 desativados.
+ 94: - Todas as escritas passam por `_salvar()`, que respeita a flag.
+ 95: - Aviso único por execução para não poluir o log.
+ 96: 
+ 97: ### `.env` e `.env.example` comentados
+ 98: 
+ 99: - Cada variável com explicação, faixa de valores e efeito colateral.
+100: - Tabela das 4 combinações `USAR_CACHE × SALVAR`.
+101: - Regra explícita: comentário só em linha própria.
+102: - Valores locais preservados (`USAR_CACHE=false` → depois `true`).
+103: 
+104: ### Base de localidades offline (IBGE) — menu 3
+105: 
+106: - Novo `src/localidades_db.py` com tabelas `localidades_estados`,
+107:   `localidades_municipios`, `localidades_bairros` no mesmo `leads.duckdb`.
+108: - `src/config.py` centraliza o loader do `.env` (antes duplicado no `whatsapp.py`).
+109: - `src/locations.py` reescrito: cache → API → grava.
+110: - Sync nacional: 27 estados, 5.571 municípios, 10.751 distritos; 643 cidades com
+111:   bairros prontos pelo IBGE.
+112: - Fallback OSM por cidade, gravado uma única vez.
+113: 
+114: ### Anti-captcha / bloqueio do Google Maps
+115: 
+116: - Detecção por URL `/sorry/`, seletores de captcha e textos ("tráfego incomum").
+117: - Retry com pausa longa (`CAPTCHA_PAUSA_SEGUNDOS`) e **cooldown global**
+118:   (`CAPTCHA_PAUSA_GLOBAL_SEGUNDOS`) entre todas as threads.
+119: - Bloqueio persistente → aborta a área e **preserva os leads já extraídos**.
+120: - Testado com Playwright real: página normal passa, página de captcha levanta
+121:   `BloqueioDetectado` após `CAPTCHA_MAX_TENTATIVAS`.
+122: 
+123: ### Correção: menu não aparecia
+124: 
+125: - `src/main.py` definia `menu_interativo()` mas **nunca chamava**.
+126: - Adicionado `if __name__ == "__main__": menu_interativo()`.
+127: 
+128: ### Banco DuckDB versionado
+129: 
+130: - `data/leads.duckdb` passou a ser versionado no Git.
+131: - `.gitignore`: removidos `data/` e `*.duckdb` da lista de ignore; adicionados
+132:   `*.duckdb.wal` e `*.duckdb.tmp`.
+133: - `*.xlsx`, `*.csv`, `*.log` continuam ignorados (confirmado com
+134:   `git check-ignore` e `git ls-files`).
+135: - ⚠️ Comitar com o programa aberto sobe o `.duckdb` sem o `.wal` (dados
+136:   desatualizados). Fechar antes.
+137: 
+138: ---
+139: 
+140: ## Pendências / próximos passos
+141: 
+142: | Item | Status |
+143: |---|---|
+144: | Bairros oficiais via CNEFE 2022 | **Não implementar por hora** (decisão do mantenedor) |
+145: | Resolução automática de captcha (2Captcha/CapMonster) | Não implementado; hoje pausa e desiste da área |
+146: | Enriquecimento de e-mail a partir dos sites | Não iniciado |
+147: | Base de bairros offline nacional | Coberto parcialmente pelo IBGE (643 cidades) |
+148: 
+149: ## Problemas conhecidos (ambiente)
+150: 
+151: - **DBeaver aberto trava o DuckDB** → cache cai para as APIs.
+152: - **Overpass/Nominatim instáveis** (502, timeout) → aquecimento por UF precisa de
+153:   paciência e retomadas.
+154: - Interprete global do mantenedor é Python 3.15; **usar `venv\Scripts\python.exe`**.
+`````
 
 ## File: src/scraper.py
-````python
+`````python
   1: # src/scraper.py
   2: from playwright.sync_api import sync_playwright
   3: import time
@@ -1991,10 +1828,321 @@ requirements.txt
 338:                 print(f"Erro na busca {termo}: {e}")
 339: 
 340:     return pd.DataFrame(todos_leads)
-````
+`````
+
+## File: src/database.py
+`````python
+  1: # src/database.py
+  2: import duckdb
+  3: import pandas as pd
+  4: import os
+  5: import re
+  6: import json
+  7: from datetime import datetime
+  8: 
+  9: # Template padrão de WhatsApp, usado para popular a tabela de templates.
+ 10: # Segmento indica o nicho para o qual a mensagem foi criada (ex.: barbearias).
+ 11: TEMPLATE_AGRUPAMENTO_PADRAO = """Opa, tudo certo?
+ 12: 
+ 13: Conhece o Agendamento Já? É uma plataforma 100% online para deixar sua agenda no piloto automático e acabar com a dor de cabeça de gerenciar horários pelo WhatsApp.
+ 14: 
+ 15: Com planos a partir de R$ 60,00 no nosso aplicativo você consegue:
+ 16: 
+ 17: • Personalizar com a identidade da sua marca
+ 18: • Lembretes automatizados via Whatsapp
+ 19: • Divulgação de horários automatizadas
+ 20: • Controle de faturamento
+ 21: • Pagamentos antecipados
+ 22: 
+ 23: Conheça nossa proposta: https://agendamentoja.com/
+ 24: Acompanhe nosso dia a dia: https://www.instagram.com/agendamentoja_
+ 25: 
+ 26: Quer ver uma demonstração rápida de como funciona na prática para o seu tipo de serviço? É só me avisar!"""
+ 27: 
+ 28: # Segmento (nicho) padrão do template acima.
+ 29: TEMPLATE_SEGMENTO_PADRAO = "barbearias"
+ 30: 
+ 31: class LeadDatabase:
+ 32:     def __init__(self, db_path="data/leads.duckdb"):
+ 33:         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+ 34:         self.db_path = db_path
+ 35:         self.conn = duckdb.connect(self.db_path)
+ 36:         self._create_sequences()
+ 37:         self._create_table()
+ 38:         self._ensure_whatsapp_columns()
+ 39:         self._ensure_lead_id()
+ 40:         self._create_templates_table()
+ 41:         self._seed_templates()
+ 42:         self._create_envios_log_table()
+ 43: 
+ 44:     def _create_sequences(self):
+ 45:         """Sequências de ids numéricos (leads e log de envios)."""
+ 46:         self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_leads_id")
+ 47:         self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_whatsapp_envios_log_id")
+ 48: 
+ 49:     def _create_table(self):
+ 50:         self.conn.execute("""
+ 51:             CREATE TABLE IF NOT EXISTS leads (
+ 52:                 lead_id INTEGER DEFAULT nextval('seq_leads_id'),
+ 53:                 nome VARCHAR,
+ 54:                 telefone VARCHAR,
+ 55:                 tipo_telefone VARCHAR,
+ 56:                 whatsapp_link VARCHAR,
+ 57:                 instagram VARCHAR,
+ 58:                 site VARCHAR,
+ 59:                 bairro VARCHAR,
+ 60:                 cidade VARCHAR,
+ 61:                 estado VARCHAR,
+ 62:                 nicho VARCHAR,
+ 63:                 status VARCHAR DEFAULT 'ativo',
+ 64:                 data_extracao TIMESTAMP,
+ 65:                 data_envio_whatsapp TIMESTAMP,
+ 66:                 status_whatsapp VARCHAR DEFAULT 'pendente',
+ 67:                 chat_id_waha VARCHAR,
+ 68:                 PRIMARY KEY (nome, cidade)
+ 69:             )
+ 70:         """)
+ 71: 
+ 72:     def _ensure_whatsapp_columns(self):
+ 73:         """Adiciona as colunas de log de WhatsApp em bancos criados antes da migração."""
+ 74:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
+ 75:         if 'data_envio_whatsapp' not in colunas:
+ 76:             self.conn.execute("ALTER TABLE leads ADD COLUMN data_envio_whatsapp TIMESTAMP")
+ 77:         if 'status_whatsapp' not in colunas:
+ 78:             self.conn.execute("ALTER TABLE leads ADD COLUMN status_whatsapp VARCHAR DEFAULT 'pendente'")
+ 79:         if 'chat_id_waha' not in colunas:
+ 80:             self.conn.execute("ALTER TABLE leads ADD COLUMN chat_id_waha VARCHAR")
+ 81: 
+ 82:     def _ensure_lead_id(self):
+ 83:         """Adiciona o id numérico em bancos antigos (backfill automático via DEFAULT)."""
+ 84:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
+ 85:         if 'lead_id' not in colunas:
+ 86:             self.conn.execute(
+ 87:                 "ALTER TABLE leads ADD COLUMN lead_id INTEGER DEFAULT nextval('seq_leads_id')"
+ 88:             )
+ 89: 
+ 90:     def _create_templates_table(self):
+ 91:         """Tabela de templates de mensagem de WhatsApp (mensagem, descrição, segmento e ativo)."""
+ 92:         self.conn.execute("""
+ 93:             CREATE TABLE IF NOT EXISTS templates_whatsapp (
+ 94:                 id INTEGER PRIMARY KEY,
+ 95:                 mensagem VARCHAR,
+ 96:                 descricao VARCHAR,
+ 97:                 segmento VARCHAR,
+ 98:                 ativo BOOLEAN DEFAULT TRUE
+ 99:             )
+100:         """)
+101:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(templates_whatsapp)").fetchall()}
+102:         if 'segmento' not in colunas:
+103:             self.conn.execute("ALTER TABLE templates_whatsapp ADD COLUMN segmento VARCHAR")
+104: 
+105:     def _seed_templates(self):
+106:         """Garante o template padrão do Agendamento Já (id=1), atualizando se já existir."""
+107:         self.conn.execute("""
+108:             INSERT INTO templates_whatsapp (id, mensagem, descricao, segmento, ativo)
+109:             VALUES (1, ?, 'Apresentação Agendamento Já', ?, TRUE)
+110:             ON CONFLICT (id) DO UPDATE SET
+111:                 mensagem = excluded.mensagem,
+112:                 descricao = excluded.descricao,
+113:                 segmento = excluded.segmento,
+114:                 ativo = excluded.ativo
+115:         """, [TEMPLATE_AGRUPAMENTO_PADRAO, TEMPLATE_SEGMENTO_PADRAO])
+116: 
+117:     def listar_templates_ativos(self):
+118:         """Retorna os templates ativos como lista de dicionários (id, mensagem, descricao, segmento, ativo)."""
+119:         return (
+120:             self.conn.execute("""
+121:                 SELECT id, mensagem, descricao, segmento, ativo
+122:                 FROM templates_whatsapp
+123:                 WHERE ativo = TRUE
+124:                 ORDER BY id
+125:             """)
+126:             .df()
+127:             .to_dict("records")
+128:         )
+129: 
+130:     def _create_envios_log_table(self):
+131:         """Tabela de log dos envios de WhatsApp (rastreamento de cada disparo).
+132: 
+133:         - `lead_id`: FK lógica para `leads.lead_id` (DuckDB não aplica FK).
+134:         - `telefone`: somente dígitos, igual a `leads.telefone` → chave de JOIN.
+135:         - `telefone_normalizado`: formato canônico 55DDDNUMERO (quando 11 dígitos).
+136:         - `payload`: retorno bruto da WAHA (JSON), útil para auditoria.
+137:         """
+138:         self.conn.execute("""
+139:             CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
+140:                 id INTEGER PRIMARY KEY DEFAULT nextval('seq_whatsapp_envios_log_id'),
+141:                 lead_id INTEGER,
+142:                 nome VARCHAR,
+143:                 cidade VARCHAR,
+144:                 telefone VARCHAR,
+145:                 telefone_normalizado VARCHAR,
+146:                 chat_id VARCHAR,
+147:                 status VARCHAR,
+148:                 mensagem VARCHAR,
+149:                 payload VARCHAR,
+150:                 erro VARCHAR,
+151:                 data_envio TIMESTAMP
+152:             )
+153:         """)
+154: 
+155:     def salvar_log_envio(self, lead_id, nome, cidade, telefone, chat_id, status,
+156:                          mensagem=None, payload=None, erro=None):
+157:         """Grava uma linha de log de envio com os campos normalizados.
+158: 
+159:         - `lead_id`: referencia `leads.lead_id` (vínculo por PK).
+160:         - `telefone` é reduzido a dígitos (mesma representação de `leads.telefone`),
+161:           permitindo JOIN direto: leads.telefone = whatsapp_envios_log.telefone.
+162:         """
+163:         telefone = re.sub(r"\D", "", str(telefone or ""))
+164:         telefone_normalizado = None
+165:         if telefone.startswith("55") and len(telefone) > 11:
+166:             base = telefone[2:]
+167:         else:
+168:             base = telefone
+169:         if len(base) == 11:
+170:             telefone_normalizado = f"55{base}"
+171:         elif telefone:
+172:             telefone_normalizado = telefone
+173: 
+174:         payload_str = None
+175:         if payload is not None:
+176:             if isinstance(payload, (dict, list)):
+177:                 try:
+178:                     payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+179:                 except Exception:
+180:                     payload_str = str(payload)
+181:             else:
+182:                 payload_str = str(payload)
+183: 
+184:         self.conn.execute("""
+185:             INSERT INTO whatsapp_envios_log
+186:                 (lead_id, nome, cidade, telefone, telefone_normalizado, chat_id,
+187:                  status, mensagem, payload, erro, data_envio)
+188:             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+189:         """, [lead_id, nome, cidade, telefone or None, telefone_normalizado, chat_id,
+190:               status, mensagem, payload_str, erro, datetime.now()])
+191: 
+192:     def save_leads(self, df: pd.DataFrame):
+193:         if df.empty:
+194:             return 0
+195:         
+196:         descartados_db = self.conn.execute("SELECT nome, cidade FROM leads WHERE status = 'descartado'").fetchall()
+197:         descartados_set = set(descartados_db)
+198:         
+199:         df = df[~df.apply(lambda row: (row['nome'], row['cidade']) in descartados_set, axis=1)]
+200:         
+201:         if df.empty:
+202:             print("Todos os leads coletados já foram descartados anteriormente. Pulando salvamento.")
+203:             return 0
+204:             
+205:         df['data_extracao'] = datetime.now()
+206:         
+207:         if 'status' not in df.columns:
+208:             df['status'] = 'ativo'
+209: 
+210:         self.conn.register('df_temp', df)
+211: 
+212:         # UPSERT preservando o status atual e as colunas de log do WhatsApp.
+213:         # Assim, re-raspar um lead já enviado NÃO apaga data_envio_whatsapp/status_whatsapp.
+214:         self.conn.execute("""
+215:             INSERT INTO leads (nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao)
+216:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao
+217:             FROM df_temp
+218:             ON CONFLICT (nome, cidade) DO UPDATE SET
+219:                 telefone = excluded.telefone,
+220:                 tipo_telefone = excluded.tipo_telefone,
+221:                 whatsapp_link = excluded.whatsapp_link,
+222:                 instagram = excluded.instagram,
+223:                 site = excluded.site,
+224:                 bairro = excluded.bairro,
+225:                 estado = excluded.estado,
+226:                 nicho = excluded.nicho,
+227:                 data_extracao = excluded.data_extracao
+228:         """)
+229: 
+230:         self.conn.unregister('df_temp')
+231:         return len(df)
+232: 
+233:     def get_leads_para_envio(self, limite=None, numero=None, cidade=None, nicho=None):
+234:         """Retorna leads ativos, celulares e ainda não enviados (evita spam/fixo).
+235: 
+236:         Filtros opcionais:
+237:         - numero: filtra por telefone (completo ou parte; ignora não-dígitos)
+238:         - cidade: filtra por nome exato da cidade
+239:         - nicho:  filtra por nicho exato
+240:         """
+241:         query = """
+242:             SELECT lead_id, nome, telefone, whatsapp_link, bairro, cidade, estado, nicho, chat_id_waha
+243:             FROM leads
+244:             WHERE status = 'ativo'
+245:               AND tipo_telefone = 'Celular'
+246:               AND (status_whatsapp IS NULL OR status_whatsapp = 'pendente')
+247:         """
+248:         params = []
+249:         if numero:
+250:             numero = re.sub(r"\D", "", str(numero))
+251:             query += " AND regexp_replace(telefone, '[^0-9]', '', 'g') LIKE ?"
+252:             params.append(f"%{numero}%")
+253:         if cidade:
+254:             query += " AND cidade = ?"
+255:             params.append(cidade)
+256:         if nicho:
+257:             query += " AND nicho = ?"
+258:             params.append(nicho)
+259:         query += " ORDER BY cidade, bairro, nome"
+260:         if limite:
+261:             query += " LIMIT ?"
+262:             params.append(int(limite))
+263:         return self.conn.execute(query, params).df()
+264: 
+265:     def salvar_chat_id_waha(self, nome, cidade, chat_id):
+266:         """Cacheia o chatId resolvido (ex.: 143172869029943@lid) para não repetir
+267:         a chamada ao /api/checkNumberStatus em envios futuros."""
+268:         self.conn.execute("""
+269:             UPDATE leads
+270:             SET chat_id_waha = ?
+271:             WHERE nome = ? AND cidade = ?
+272:         """, [chat_id, nome, cidade])
+273: 
+274:     def marcar_envio(self, nome, cidade, status_whatsapp):
+275:         """Registra o resultado do envio. 'data_envio_whatsapp' é gravado apenas no sucesso."""
+276:         if status_whatsapp == 'enviado':
+277:             self.conn.execute("""
+278:                 UPDATE leads
+279:                 SET status_whatsapp = ?, data_envio_whatsapp = ?
+280:                 WHERE nome = ? AND cidade = ?
+281:             """, [status_whatsapp, datetime.now(), nome, cidade])
+282:         else:
+283:             self.conn.execute("""
+284:                 UPDATE leads
+285:                 SET status_whatsapp = ?
+286:                 WHERE nome = ? AND cidade = ?
+287:             """, [status_whatsapp, nome, cidade])
+288: 
+289:     def export_to_excel(self, nicho: str, cidade: str):
+290:         df = self.conn.execute("""
+291:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, data_extracao 
+292:             FROM leads 
+293:             WHERE nicho = ? AND cidade = ? AND status = 'ativo'
+294:             ORDER BY bairro, nome
+295:         """, [nicho, cidade]).df()
+296:         
+297:         if df.empty:
+298:             print("Nenhum dado ativo para exportar.")
+299:             return
+300:             
+301:         os.makedirs("output", exist_ok=True)
+302:         nome_arquivo = f"output/leads_{nicho}_{cidade}.xlsx".replace(" ", "_").lower()
+303:         df.to_excel(nome_arquivo, index=False)
+304:         print(f"🎉 Exportação concluída: {nome_arquivo} ({len(df)} leads ativos)")
+305: 
+306:     def close(self):
+307:         self.conn.close()
+`````
 
 ## File: src/locations.py
-````python
+`````python
   1: # src/locations.py
   2: """Localidades (UF, cidade e bairros) com cache local em DuckDB.
   3: 
@@ -2600,10 +2748,252 @@ requirements.txt
 603:           f"({stats.get('cidades_prontas', 0)} cidades com bairros prontos).")
 604:     print("Sincronização concluída.")
 605:     return True
-````
+`````
+
+## File: src/whatsapp.py
+`````python
+  1: # src/whatsapp.py
+  2: """Integração com a WAHA (WhatsApp HTTP API) para envio de mensagens aos leads.
+  3: 
+  4: Configuração via variáveis de ambiente:
+  5:     WAHA_API_URL   -> URL base da WAHA (padrão: http://localhost:3000)
+  6:     WAHA_API_KEY   -> chave de API da WAHA (obrigatória se a instância exigir)
+  7:     WAHA_SESSION   -> nome da sessão conectada na WAHA (padrão: "default")
+  8: 
+  9: O módulo só envia para leads:
+ 10:     - status = 'ativo'
+ 11:     - tipo_telefone = 'Celular'  (nunca fixo)
+ 12:     - ainda não enviados (status_whatsapp = 'pendente' ou NULL)
+ 13: """
+ 14: import os
+ 15: import re
+ 16: import time
+ 17: 
+ 18: import requests
+ 19: 
+ 20: from src.config import carregar_env, str_para_bool
+ 21: 
+ 22: carregar_env()
+ 23: 
+ 24: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
+ 25: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
+ 26: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
+ 27: 
+ 28: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
+ 29: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
+ 30: 
+ 31: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
+ 32: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
+ 33: 
+ 34: # Intervalo (segundos) entre envios e limite de leads por campanha.
+ 35: # WAHA_LIMITE vazio = sem limite (envia todos os pendentes).
+ 36: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
+ 37: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
+ 38: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
+ 39: 
+ 40: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
+ 41: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
+ 42: 
+ 43: 
+ 44: def _normalizar_chatid(telefone):
+ 45:     """Converte o telefone salvo em um chatId clássico do WAHA (55DDDNUMERO@c.us)."""
+ 46:     numero = re.sub(r"\D", "", str(telefone or ""))
+ 47:     if not numero:
+ 48:         return None
+ 49: 
+ 50:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
+ 51:     if numero.startswith("55") and len(numero) > 11:
+ 52:         numero = numero[2:]
+ 53: 
+ 54:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
+ 55:     if len(numero) != 11:
+ 56:         return None
+ 57: 
+ 58:     return f"55{numero}@c.us"
+ 59: 
+ 60: 
+ 61: def _resolver_chatid_waha(telefone, session=None, api_url=None, api_key=None):
+ 62:     """Resolve o chatId correto via /api/checkNumberStatus.
+ 63: 
+ 64:     Números recentes no WhatsApp usam o formato @lid (hidden user ID) em vez do
+ 65:     clássico @c.us. Enviar com @c.us para esses números retorna HTTP 500.
+ 66:     A WAHA responde o chatId certo via checkNumberStatus; usamos ele e, se a
+ 67:     consulta falhar ou o número não existir, caímos no formato clássico @c.us.
+ 68:     """
+ 69:     session = session or WAHA_SESSION
+ 70:     api_url = api_url or WAHA_API_URL
+ 71:     api_key = api_key if api_key is not None else WAHA_API_KEY
+ 72: 
+ 73:     numero = re.sub(r"\D", "", str(telefone or ""))
+ 74:     if not numero:
+ 75:         return None
+ 76: 
+ 77:     if numero.startswith("55") and len(numero) > 11:
+ 78:         numero = numero[2:]
+ 79:     if len(numero) != 11:
+ 80:         return None
+ 81: 
+ 82:     telefone_internacional = f"55{numero}"
+ 83: 
+ 84:     headers = {"Accept": "application/json"}
+ 85:     if api_key:
+ 86:         headers["X-Api-Key"] = api_key
+ 87: 
+ 88:     url = f"{api_url.rstrip('/')}/api/checkNumberStatus"
+ 89:     params = {"session": session, "phone": telefone_internacional}
+ 90: 
+ 91:     try:
+ 92:         response = requests.get(url, params=params, headers=headers, timeout=20)
+ 93:         response.raise_for_status()
+ 94:         dados = response.json()
+ 95:         if dados.get("numberExists") and dados.get("chatId"):
+ 96:             return dados["chatId"]
+ 97:     except Exception:
+ 98:         pass
+ 99: 
+100:     # Fallback: formato clássico @c.us (funciona para números mais antigos).
+101:     return f"{telefone_internacional}@c.us"
+102: 
+103: 
+104: def _limpar_markdown_whatsapp(texto):
+105:     """Remove marcação de markdown (negrito e links) antes de enviar ao WhatsApp.
+106: 
+107:     - **texto**  -> texto
+108:     - [rótulo](url) -> url (quando o rótulo já é a própria URL) ou "rótulo (url)"
+109:     """
+110:     texto = re.sub(r"\*\*([^*]+)\*\*", r"\1", texto)
+111: 
+112:     def _sub_link(match):
+113:         rotulo = match.group(1)
+114:         url = match.group(2)
+115:         if rotulo.strip() == url.strip():
+116:             return url
+117:         return f"{rotulo} ({url})"
+118: 
+119:     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _sub_link, texto)
+120: 
+121: 
+122: def _renderizar_mensagem(template, lead):
+123:     """Substitui {nome}, {bairro} e {cidade} de forma segura e limpa o markdown."""
+124:     bairro = str(lead.get("bairro") or "sua região")
+125:     cidade = str(lead.get("cidade") or "")
+126:     texto = (
+127:         template
+128:         .replace("{nome}", str(lead.get("nome") or ""))
+129:         .replace("{bairro}", bairro)
+130:         .replace("{cidade}", cidade)
+131:     )
+132:     return _limpar_markdown_whatsapp(texto)
+133: 
+134: 
+135: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
+136:     """Envia uma mensagem de texto via WAHA."""
+137:     session = session or WAHA_SESSION
+138:     api_url = api_url or WAHA_API_URL
+139:     api_key = api_key if api_key is not None else WAHA_API_KEY
+140:     url = f"{api_url.rstrip('/')}/api/sendText"
+141: 
+142:     payload = {
+143:         "session": session,
+144:         "chatId": chat_id,
+145:         "text": texto,
+146:     }
+147: 
+148:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
+149:     if api_key:
+150:         headers["X-Api-Key"] = api_key
+151: 
+152:     response = requests.post(url, json=payload, headers=headers, timeout=30)
+153:     response.raise_for_status()
+154:     return response.json()
+155: 
+156: 
+157: def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None):
+158:     """Envia uma mensagem de texto para um número bruto (com DDD), já normalizado.
+159: 
+160:     Útil para o envio de teste, sem precisar de um lead no banco.
+161:     """
+162:     texto = _limpar_markdown_whatsapp(texto)
+163:     chat_id = _resolver_chatid_waha(numero, session=session, api_url=api_url, api_key=api_key)
+164:     if not chat_id:
+165:         raise ValueError(f"Número inválido para envio: {numero}")
+166:     return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
+167: 
+168: 
+169: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None):
+170:     """Envia mensagens para os leads celulares pendentes.
+171: 
+172:     - db: instância de LeadDatabase
+173:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
+174:     - intervalo: pausa em segundos entre envios (evita spam e banimento)
+175:     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
+176:     """
+177:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
+178:     if leads is None:
+179:         leads = db.get_leads_para_envio(limite)
+180: 
+181:     if leads.empty:
+182:         print("Nenhum lead celular pendente de envio.")
+183:         return
+184: 
+185:     total = len(leads)
+186:     print(f"Enviando para {total} lead(s) celular(es), com intervalo de {intervalo}s...")
+187: 
+188:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
+189:         texto = _renderizar_mensagem(mensagem_template, lead)
+190:         lead_id = lead.get("lead_id")
+191:         telefone = lead.get("telefone")
+192:         nome = lead.get("nome")
+193:         cidade = lead.get("cidade")
+194: 
+195:         chat_id = lead.get("chat_id_waha")
+196:         if not chat_id:
+197:             # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
+198:             # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
+199:             chat_id = _resolver_chatid_waha(telefone)
+200:             if chat_id:
+201:                 db.salvar_chat_id_waha(nome, cidade, chat_id)
+202: 
+203:         if not chat_id:
+204:             db.marcar_envio(nome, cidade, "falhou")
+205:             db.salvar_log_envio(
+206:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
+207:                 mensagem=texto, erro="telefone inválido",
+208:             )
+209:             print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
+210:             continue
+211: 
+212:         try:
+213:             resposta = enviar_texto_waha(chat_id, texto)
+214:             db.marcar_envio(nome, cidade, "enviado")
+215:             db.salvar_log_envio(
+216:                 lead_id, nome, cidade, telefone, chat_id, "enviado",
+217:                 mensagem=texto, payload=resposta,
+218:             )
+219:             print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
+220:         except Exception as e:
+221:             payload_erro = None
+222:             if getattr(e, "response", None) is not None:
+223:                 try:
+224:                     payload_erro = e.response.text
+225:                 except Exception:
+226:                     payload_erro = None
+227:             erro = f"{type(e).__name__}: {e}"
+228:             db.marcar_envio(nome, cidade, "falhou")
+229:             db.salvar_log_envio(
+230:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
+231:                 mensagem=texto, payload=payload_erro, erro=erro,
+232:             )
+233:             print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
+234: 
+235:         if i < total:
+236:             time.sleep(intervalo)
+237: 
+238:     print("Campanha finalizada.")
+`````
 
 ## File: .gitignore
-````
+`````
  1: # Dados: o banco DuckDB É versionado (data/leads.duckdb).
  2: # Apenas artefatos transientes do DuckDB e saídas geradas ficam de fora.
  3: *.duckdb.wal
@@ -2635,223 +3025,10 @@ requirements.txt
 29: # Sistema Operacional
 30: .DS_Store
 31: Thumbs.db
-````
-
-## File: src/main.py
-````python
-  1: # src/main.py
-  2: import sys
-  3: import os
-  4: 
-  5: sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-  6: 
-  7: from src.locations import (
-  8:     obter_estados,
-  9:     obter_cidades,
- 10:     obter_termos_busca,
- 11:     obter_municipio,
- 12:     filtrar_cidades,
- 13:     sincronizar_base_localidades,
- 14:     listar_municipios_pendentes,
- 15:     aquecer_bairros_uf,
- 16:     SALVAR as LOCALIDADES_SALVAR,
- 17: )
- 18: from src.scraper import rodar_scraper_multithread
- 19: from src.database import LeadDatabase
- 20: from src.whatsapp import (
- 21:     disparar_campanha,
- 22:     MENSAGEM_PADRAO,
- 23:     WAHA_INTERVALO,
- 24:     WAHA_LIMITE,
- 25:     WAHA_ATIVO,
- 26:     SOMENTE_ENVIO,
- 27: )
- 28: 
- 29: 
- 30: def coletar_leads():
- 31:     df_estados = obter_estados()
- 32:     if df_estados.empty:
- 33:         return
- 34: 
- 35:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
- 36:     if uf_escolhida not in df_estados['uf'].values:
- 37:         print("UF inválida.")
- 38:         return
- 39: 
- 40:     cidades = obter_cidades(uf_escolhida)
- 41:     termo_cidade = input("Digite o nome da cidade: ").strip()
- 42:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
- 43: 
- 44:     if not cidades_filtradas:
- 45:         print("Cidade não encontrada.")
- 46:         return
- 47:     elif len(cidades_filtradas) > 1:
- 48:         cidade_escolhida = input(
- 49:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
- 50:         ).strip()
- 51:         exatos = filtrar_cidades(cidades, cidade_escolhida)
- 52:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
- 53:     else:
- 54:         cidade_escolhida = cidades_filtradas[0]
- 55: 
- 56:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
- 57:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
- 58:     if municipio:
- 59:         cidade_escolhida = municipio["nome"]
- 60:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
- 61:     else:
- 62:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
- 63: 
- 64:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
- 65: 
- 66:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
- 67: 
- 68:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
- 69: 
- 70:     print("\nIniciando extração...")
- 71:     db = LeadDatabase()
- 72: 
- 73:     df_resultados = rodar_scraper_multithread(
- 74:         nicho=nicho,
- 75:         cidade=cidade_escolhida,
- 76:         uf=uf_escolhida,
- 77:         termos_lista=termos_busca,
- 78:         mostrar_navegador=mostrar_navegador,
- 79:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
- 80:     )
- 81: 
- 82:     if not df_resultados.empty:
- 83:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
- 84:         db.export_to_excel(nicho, cidade_escolhida)
- 85:     else:
- 86:         print("Nenhum dado extraído.")
- 87: 
- 88:     db.close()
- 89: 
- 90: 
- 91: def enviar_whatsapp_menu():
- 92:     print("\n=== ENVIO WHATSAPP (WAHA) ===")
- 93: 
- 94:     if not WAHA_ATIVO:
- 95:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
- 96:         return
- 97: 
- 98:     db = LeadDatabase()
- 99: 
-100:     pendentes = db.get_leads_para_envio(limite=WAHA_LIMITE)
-101:     if pendentes.empty:
-102:         print("Nenhum lead celular pendente de envio.")
-103:         db.close()
-104:         return
-105: 
-106:     print(f"{len(pendentes)} lead(s) celular(es) pendentes (fixos são ignorados).")
-107:     if WAHA_LIMITE:
-108:         print(f"Limite configurado: {WAHA_LIMITE} lead(s) por campanha.")
-109: 
-110:     print(f"Mensagem padrão: {MENSAGEM_PADRAO}")
-111:     mensagem = input("Digite a mensagem (ou Enter para usar a padrão): ").strip()
-112:     if not mensagem:
-113:         mensagem = MENSAGEM_PADRAO
-114: 
-115:     confirmar = input(f"Enviar para {len(pendentes)} lead(s)? (S/N): ").strip().upper()
-116:     if confirmar != 'S':
-117:         print("Envio cancelado.")
-118:         db.close()
-119:         return
-120: 
-121:     disparar_campanha(db, mensagem_template=mensagem, intervalo=WAHA_INTERVALO, limite=WAHA_LIMITE)
-122:     db.close()
-123: 
-124: 
-125: def aquecer_bairros_menu():
-126:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
-127:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
-128: 
-129:     if not LOCALIDADES_SALVAR:
-130:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
-131:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
-132:         return
-133: 
-134:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
-135:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
-136: 
-137:     df_estados = obter_estados()
-138:     if df_estados.empty:
-139:         print("Não foi possível obter a lista de estados.")
-140:         return
-141: 
-142:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
-143:     if uf not in df_estados['uf'].values:
-144:         print("UF inválida.")
-145:         return
-146: 
-147:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
-148:     pendentes = listar_municipios_pendentes(uf)
-149:     if not pendentes:
-150:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
-151:         return
-152: 
-153:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
-154:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
-155:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
-156: 
-157:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
-158:     max_cidades = 0
-159:     if limite:
-160:         try:
-161:             max_cidades = max(1, int(limite))
-162:         except ValueError:
-163:             print("Valor inválido. Usando todas.")
-164:             max_cidades = 0
-165: 
-166:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
-167:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
-168:     if confirmar != 'S':
-169:         print("Operação cancelada.")
-170:         return
-171: 
-172:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
-173: 
-174: 
-175: def menu_interativo():
-176:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
-177:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
-178:     so_enviar_cli = "--so-enviar" in sys.argv
-179: 
-180:     if SOMENTE_ENVIO or so_enviar_cli:
-181:         enviar_whatsapp_menu()
-182:         return
-183: 
-184:     while True:
-185:         print("\n=== MAP SCRAPER ===")
-186:         print("1 - Coletar leads")
-187:         print("2 - Enviar mensagens WhatsApp")
-188:         print("3 - Sincronizar base de localidades (IBGE)")
-189:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
-190:         print("5 - Sair")
-191:         opcao = input("Escolha uma opção: ").strip()
-192: 
-193:         if opcao == "1":
-194:             coletar_leads()
-195:         elif opcao == "2":
-196:             enviar_whatsapp_menu()
-197:         elif opcao == "3":
-198:             sincronizar_base_localidades()
-199:         elif opcao == "4":
-200:             aquecer_bairros_menu()
-201:         elif opcao == "5":
-202:             print("Até mais!")
-203:             break
-204:         else:
-205:             print("Opção inválida.")
-206: 
-207: 
-208: if __name__ == "__main__":
-209:     menu_interativo()
-````
+`````
 
 ## File: README.md
-````markdown
+`````markdown
   1: Documentação do Projeto: MAP SCRAPER
   2: 
   3: 1. Objetivo do Projeto
@@ -3181,19 +3358,2893 @@ requirements.txt
 327:     Cada item traz a faixa de valores e o efeito colateral. Comentários devem
 328:     ficar em linha própria; comentário na mesma linha do valor é lido como parte
 329:     do valor.
-````
+`````
+
+## File: src/main.py
+`````python
+  1: # src/main.py
+  2: import sys
+  3: import os
+  4: 
+  5: sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+  6: 
+  7: from src.locations import (
+  8:     obter_estados,
+  9:     obter_cidades,
+ 10:     obter_termos_busca,
+ 11:     obter_municipio,
+ 12:     filtrar_cidades,
+ 13:     sincronizar_base_localidades,
+ 14:     listar_municipios_pendentes,
+ 15:     aquecer_bairros_uf,
+ 16:     SALVAR as LOCALIDADES_SALVAR,
+ 17: )
+ 18: from src.scraper import rodar_scraper_multithread
+ 19: from src.database import LeadDatabase
+ 20: from src.whatsapp import (
+ 21:     disparar_campanha,
+ 22:     enviar_texto_numero,
+ 23:     WAHA_INTERVALO,
+ 24:     WAHA_LIMITE,
+ 25:     WAHA_ATIVO,
+ 26:     SOMENTE_ENVIO,
+ 27: )
+ 28: 
+ 29: 
+ 30: def coletar_leads():
+ 31:     df_estados = obter_estados()
+ 32:     if df_estados.empty:
+ 33:         return
+ 34: 
+ 35:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+ 36:     if uf_escolhida not in df_estados['uf'].values:
+ 37:         print("UF inválida.")
+ 38:         return
+ 39: 
+ 40:     cidades = obter_cidades(uf_escolhida)
+ 41:     termo_cidade = input("Digite o nome da cidade: ").strip()
+ 42:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
+ 43: 
+ 44:     if not cidades_filtradas:
+ 45:         print("Cidade não encontrada.")
+ 46:         return
+ 47:     elif len(cidades_filtradas) > 1:
+ 48:         cidade_escolhida = input(
+ 49:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
+ 50:         ).strip()
+ 51:         exatos = filtrar_cidades(cidades, cidade_escolhida)
+ 52:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
+ 53:     else:
+ 54:         cidade_escolhida = cidades_filtradas[0]
+ 55: 
+ 56:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
+ 57:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
+ 58:     if municipio:
+ 59:         cidade_escolhida = municipio["nome"]
+ 60:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
+ 61:     else:
+ 62:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
+ 63: 
+ 64:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
+ 65: 
+ 66:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
+ 67: 
+ 68:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
+ 69: 
+ 70:     print("\nIniciando extração...")
+ 71:     db = LeadDatabase()
+ 72: 
+ 73:     df_resultados = rodar_scraper_multithread(
+ 74:         nicho=nicho,
+ 75:         cidade=cidade_escolhida,
+ 76:         uf=uf_escolhida,
+ 77:         termos_lista=termos_busca,
+ 78:         mostrar_navegador=mostrar_navegador,
+ 79:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
+ 80:     )
+ 81: 
+ 82:     if not df_resultados.empty:
+ 83:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
+ 84:         db.export_to_excel(nicho, cidade_escolhida)
+ 85:     else:
+ 86:         print("Nenhum dado extraído.")
+ 87: 
+ 88:     db.close()
+ 89: 
+ 90: 
+ 91: def _confirmar(texto):
+ 92:     """Pergunta S/N e retorna True para respostas afirmativas."""
+ 93:     return input(texto).strip().upper() in ("S", "SIM", "Y", "YES")
+ 94: 
+ 95: 
+ 96: def _escolher_template(templates):
+ 97:     """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
+ 98:     print("\nTemplates ativos:")
+ 99:     for t in templates:
+100:         segmento = t.get("segmento")
+101:         sufixo = f"  [{segmento}]" if segmento else ""
+102:         print(f"  {t['id']} - {t['descricao']}{sufixo}")
+103: 
+104:     escolha = input("Escolha o template (Enter = primeiro): ").strip()
+105:     if not escolha:
+106:         return templates[0]["mensagem"]
+107: 
+108:     for t in templates:
+109:         if str(t["id"]) == escolha:
+110:             return t["mensagem"]
+111: 
+112:     print("Opção inválida. Usando o primeiro template.")
+113:     return templates[0]["mensagem"]
+114: 
+115: 
+116: def _escolher_filtros():
+117:     """Pergunta os filtros de envio; Enter = sem filtro (todos os leads)."""
+118:     print("\n=== FILTROS DE ENVIO ===")
+119:     print("0 - Todos (sem filtro)")
+120:     print("1 - Por número")
+121:     print("2 - Por cidade")
+122:     print("3 - Por nicho")
+123:     opcao = input("Escolha um filtro (Enter = 0): ").strip() or "0"
+124: 
+125:     numero = cidade = nicho = None
+126:     if opcao == "1":
+127:         numero = input("Número (completo ou parte): ").strip() or None
+128:     elif opcao == "2":
+129:         cidade = input("Cidade: ").strip() or None
+130:     elif opcao == "3":
+131:         nicho = input("Nicho: ").strip() or None
+132:     elif opcao != "0":
+133:         print("Opção inválida. Usando 'Todos'.")
+134:     return numero, cidade, nicho
+135: 
+136: 
+137: def testar_envio(db, mensagem, pendentes=None):
+138:     """Envia um teste para um número digitado ou para um lead pendente.
+139: 
+140:     `pendentes` (opcional): DataFrame já filtrado; se None, busca até 10 pendentes.
+141:     """
+142:     print("\n--- TESTE DE ENVIO ---")
+143:     print("1 - Digitar um número de teste")
+144:     print("2 - Escolher um lead pendente")
+145:     opcao = input("Escolha: ").strip()
+146: 
+147:     numero = None
+148:     if opcao == "1":
+149:         numero = input("Digite o número com DDD (ex: 51999998888): ").strip()
+150:     elif opcao == "2":
+151:         if pendentes is None:
+152:             pendentes = db.get_leads_para_envio(limite=10)
+153:         if pendentes.empty:
+154:             print("Nenhum lead pendente para testar.")
+155:             return
+156:         amostra = pendentes.head(10)
+157:         print("Leads pendentes:")
+158:         for i, (_, lead) in enumerate(amostra.iterrows(), 1):
+159:             print(f"  {i} - {lead['nome']} ({lead['telefone']})")
+160:         escolha = input("Escolha o número do lead: ").strip()
+161:         if not escolha.isdigit() or not (1 <= int(escolha) <= len(amostra)):
+162:             print("Escolha inválida.")
+163:             return
+164:         numero = amostra.iloc[int(escolha) - 1]["telefone"]
+165:     else:
+166:         print("Opção inválida.")
+167:         return
+168: 
+169:     if not numero:
+170:         print("Nenhum número informado.")
+171:         return
+172: 
+173:     try:
+174:         enviar_texto_numero(numero, mensagem)
+175:         print(f"✅ Teste enviado para {numero}")
+176:     except Exception as e:
+177:         print(f"❌ Falha no teste para {numero}: {e}")
+178: 
+179: 
+180: def enviar_whatsapp_menu():
+181:     print("\n=== ENVIO WHATSAPP (WAHA) ===")
+182: 
+183:     if not WAHA_ATIVO:
+184:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
+185:         return
+186: 
+187:     db = LeadDatabase()
+188: 
+189:     templates = db.listar_templates_ativos()
+190:     if not templates:
+191:         print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
+192:         db.close()
+193:         return
+194: 
+195:     mensagem = _escolher_template(templates)
+196: 
+197:     numero_f, cidade_f, nicho_f = _escolher_filtros()
+198: 
+199:     pendentes = db.get_leads_para_envio(
+200:         limite=WAHA_LIMITE, numero=numero_f, cidade=cidade_f, nicho=nicho_f
+201:     )
+202: 
+203:     if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
+204:         testar_envio(db, mensagem, pendentes=pendentes)
+205: 
+206:     if pendentes.empty:
+207:         print("Nenhum lead celular pendente de envio (com os filtros aplicados).")
+208:         db.close()
+209:         return
+210: 
+211:     print(f"\n{len(pendentes)} lead(s) celular(es) pendentes (fixos são ignorados).")
+212:     if WAHA_LIMITE:
+213:         print(f"Limite configurado: {WAHA_LIMITE} lead(s) por campanha.")
+214: 
+215:     if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
+216:         print("Envio cancelado.")
+217:         db.close()
+218:         return
+219: 
+220:     disparar_campanha(
+221:         db,
+222:         mensagem_template=mensagem,
+223:         intervalo=WAHA_INTERVALO,
+224:         limite=WAHA_LIMITE,
+225:         leads=pendentes,
+226:     )
+227:     db.close()
+228: 
+229: 
+230: def aquecer_bairros_menu():
+231:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
+232:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
+233: 
+234:     if not LOCALIDADES_SALVAR:
+235:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
+236:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
+237:         return
+238: 
+239:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
+240:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
+241: 
+242:     df_estados = obter_estados()
+243:     if df_estados.empty:
+244:         print("Não foi possível obter a lista de estados.")
+245:         return
+246: 
+247:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+248:     if uf not in df_estados['uf'].values:
+249:         print("UF inválida.")
+250:         return
+251: 
+252:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
+253:     pendentes = listar_municipios_pendentes(uf)
+254:     if not pendentes:
+255:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
+256:         return
+257: 
+258:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
+259:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
+260:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
+261: 
+262:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
+263:     max_cidades = 0
+264:     if limite:
+265:         try:
+266:             max_cidades = max(1, int(limite))
+267:         except ValueError:
+268:             print("Valor inválido. Usando todas.")
+269:             max_cidades = 0
+270: 
+271:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
+272:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
+273:     if confirmar != 'S':
+274:         print("Operação cancelada.")
+275:         return
+276: 
+277:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
+278: 
+279: 
+280: def menu_interativo():
+281:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
+282:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
+283:     so_enviar_cli = "--so-enviar" in sys.argv
+284: 
+285:     if SOMENTE_ENVIO or so_enviar_cli:
+286:         enviar_whatsapp_menu()
+287:         return
+288: 
+289:     while True:
+290:         print("\n=== MAP SCRAPER ===")
+291:         print("1 - Coletar leads")
+292:         print("2 - Enviar mensagens WhatsApp")
+293:         print("3 - Sincronizar base de localidades (IBGE)")
+294:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
+295:         print("5 - Sair")
+296:         opcao = input("Escolha uma opção: ").strip()
+297: 
+298:         if opcao == "1":
+299:             coletar_leads()
+300:         elif opcao == "2":
+301:             enviar_whatsapp_menu()
+302:         elif opcao == "3":
+303:             sincronizar_base_localidades()
+304:         elif opcao == "4":
+305:             aquecer_bairros_menu()
+306:         elif opcao == "5":
+307:             print("Até mais!")
+308:             break
+309:         else:
+310:             print("Opção inválida.")
+311: 
+312: 
+313: if __name__ == "__main__":
+314:     menu_interativo()
+`````
 
 
 # Git Diffs
 ## Git Diffs Working Tree
-````diff
+`````diff
+diff --git a/data/leads.duckdb b/data/leads.duckdb
+index 3f1852f..9579887 100644
+Binary files a/data/leads.duckdb and b/data/leads.duckdb differ
+diff --git a/repomix-output.md b/repomix-output.md
+index ac7782a..22f3bbd 100644
+--- a/repomix-output.md
++++ b/repomix-output.md
+@@ -1,37 +1,44 @@
+-Este arquivo é uma representação mesclada de todo o código-fonte, combinado em um único documento pelo Repomix.
+-O conteúdo foi processado onde números de linha foram adicionados.
++This file is a merged representation of the entire codebase, combined into a single document by Repomix.
++The content has been processed where line numbers have been added.
+ 
+-# Resumo do Arquivo
++# File Summary
+ 
+-## Propósito
+-Este arquivo contém uma representação empacotada de todo o conteúdo do repositório. Ele foi projetado para ser facilmente consumível por sistemas de IA para análise, revisão de código ou outros processos automatizados.
++## Purpose
++This file contains a packed representation of the entire repository's contents.
++It is designed to be easily consumable by AI systems for analysis, code review,
++or other automated processes.
+ 
+-## Formato do Arquivo
+-O conteúdo está organizado da seguinte forma:
+-1. Esta seção de resumo
+-2. Informações do repositório
+-3. Estrutura de diretórios
+-4. Arquivos do repositório (se habilitado)
+-5. Múltiplas entradas de arquivos, cada uma consistindo de:
+-  a. Um cabeçalho com o caminho do arquivo (## File: path/to/file)
+-  b. O conteúdo completo do arquivo em um bloco de código
++## File Format
++The content is organized as follows:
++1. This summary section
++2. Repository information
++3. Directory structure
++4. Repository files (if enabled)
++5. Multiple file entries, each consisting of:
++  a. A header with the file path (## File: path/to/file)
++  b. The full contents of the file in a code block
+ 
+-## Diretrizes de Uso
+-- Este arquivo deve ser tratado como somente leitura. Quaisquer alterações devem ser feitas nos arquivos originais do repositório, não nesta versão empacotada.
+-- Ao processar este arquivo, use o caminho do arquivo para distinguir entre os diferentes arquivos no repositório.
+-- Esteja ciente de que este arquivo pode conter informações confidenciais. Manuseie-o com o mesmo nível de segurança que você faria com o repositório original.
+-- Preste atenção especial às Instruções do Repositório. Elas contêm contexto importante e diretrizes específicas para este projeto.
++## Usage Guidelines
++- This file should be treated as read-only. Any changes should be made to the
++  original repository files, not this packed version.
++- When processing this file, use the file path to distinguish
++  between different files in the repository.
++- Be aware that this file may contain sensitive information. Handle it with
++  the same level of security as you would the original repository.
+ 
+-## Notas
+-- Alguns arquivos podem ter sido excluídos com base nas regras do .gitignore e na configuração do Repomix.
+-- Arquivos binários não estão incluídos nesta representação empacotada. Consulte a seção de Estrutura do Repositório para obter uma lista completa de caminhos de arquivos, incluindo arquivos binários.
+-- Arquivos que correspondem a padrões no .gitignore são excluídos.
+-- Arquivos que correspondem a padrões de ignore padrão são excluídos.
+-- Números de linha foram adicionados ao início de cada linha.
+-- Os arquivos são classificados por contagem de alterações do Git (arquivos com mais alterações estão na parte inferior).
+-- Os diffs do Git da árvore de trabalho e das alterações preparadas estão incluídos.
++- Pay special attention to the Repository Instruction. These contain important context and guidelines specific to this project.
+ 
+-# Estrutura de Diretórios
++## Notes
++- Some files may have been excluded based on .gitignore rules and Repomix's configuration
++- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
++- Files matching patterns in .gitignore are excluded
++- Files matching default ignore patterns are excluded
++- Line numbers have been added to the beginning of each line
++- Files are sorted by Git change count (files with more changes are at the bottom)
++- Git diffs from the worktree and staged changes are included
++
++# Directory Structure
++````
+ data/
+   leads.duckdb
+ memory/
+@@ -63,6 +70,196 @@ requirements.txt
+ 
+ # Files
+ 
++## File: memory/04-como-contribuir.md
++````markdown
++ 1: # 04 — Como Contribuir: Padrões e Boas Práticas
++ 2: 
++ 3: Este documento detalha os padrões de código, estilo e comunicação esperados
++ 4: para novas contribuições, visando manter a consistência e facilitar a manutenção.
++ 5: 
++ 6: ---
++ 7: 
++ 8: ## 1. Organização de Código e Nomenclatura
++ 9: 
++10: - **Imports:** Sempre absolutos, começando da raiz `src/`. Ex: `from src.config import ...`.
++11: - **Constantes:** `MAIUSCULAS_COM_UNDERLINE`.
++12: - **Funções privadas (internas ao módulo):** `_nome_da_funcao_privada` (com underscore inicial).
++13: - **Variáveis locais:** `snake_case`.
++14: - **Classes:** `CamelCase`.
++15: - **Parâmetros de função:** `snake_case`.
++16: 
++17: ---
++18: 
++19: ## 2. Logs e Interação com o Usuário
++20: 
++21: - **Prints de progresso:** Use `print(f"[{area_da_busca}] Mensagem...")`.
++22:   O `[área]` (ex: `[Canoas-RS]`, `[Assis Brasil]`) ajuda a identificar qual thread
++23:   ou cidade está processando no momento.
++24: - **Mensagens de erro:** Inclua `type(e).__name__` e `str(e)[:N]` para facilitar
++25:   a depuração em ambientes remotos ou com logs limitados.
++26: - **Interação:** Use `input()` para entradas do usuário no console. Evite `print()`
++27:   seguido de `input()` em linhas separadas para prompts, a menos que seja intencional.
++28: - **Mensagens para o usuário:** Devem ser claras e úteis, preferencialmente
++29:   em português (padrão atual do projeto).
++30: 
++31: ---
++32: 
++33: ## 3. Variáveis de Ambiente e Configuração
++34: 
++35: - **Todas as configurações** devem ser lidas do `.env` via `src/config.py`.
++36: - **Nunca faça hardcode** de URLs de APIs, chaves, limites, etc.
++37: - **Novas variáveis:** Adicione ao `.env.example` com comentários explicativos.
++38: - **Semântica:** Use `true`/`false` para booleanos, números para inteiros.
++39:   O `src/config.py` já tem helpers para isso (`str_para_bool`, `env_int`).
++40: 
++41: ---
++42: 
++43: ## 4. Testes e Validação
++44: 
++45: - **Testes unitários/de integração:** Idealmente, adicione pequenos scripts de
++46:   validação (como os que o modelo Gemini tem feito) para cobrir novas features
++47:   ou refatorações.
++48: - **DuckDB:** Para testes que não devem tocar no banco real, use um arquivo
++49:   DuckDB temporário (`tempfile.gettempdir()`) e defina `localidades_db.DB_PATH_PADRAO`.
++50: - **Encoding:** Mantenha os arquivos em **UTF-8 sem BOM**.
++51:   Valide a acentuação após edições em lote: procure caracteres de dupla
++52:   codificação (por exemplo, `A` com til U+00C3 seguido de símbolo de moeda).
++53: 
++54: ---
++55: 
++56: ## 5. Documentação
++57: 
++58: - **`README.md` (raiz):** Manual do usuário, instalação, execução, fluxo geral.
++59: - **`memory/`:** Resumos densos para modelos de IA. **Atualize ao mudar comportamento**.
++60:   - `00-resumo-projeto.md`: alto nível.
++61:   - `01-arquitetura-e-modulos.md`: detalhe de cada módulo.
++62:   - `02-decisoes-e-armadilhas.md`: o "porquê" das decisões, bugs conhecidos.
++63:   - `03-historico-de-mudancas.md`: log recente das mudanças importantes.
++64: - **Docstrings:** Use docstrings Python para explicar funções e classes.
++65: - **Comentários de código:** Breves e pontuais, explicando lógica complexa ou escolhas não óbvias.
++````
++
++## File: src/__init__.py
++````python
++1: 
++````
++
++## File: src/config.py
++````python
++ 1: # src/config.py
++ 2: """Carregamento centralizado do arquivo .env e leitura de flags.
++ 3: 
++ 4: Todos os módulos importam este arquivo, então o `.env` é lido uma única vez
++ 5: por processo, antes de qualquer constante de configuração ser calculada.
++ 6: """
++ 7: import os
++ 8: 
++ 9: PROJETO_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++10: CAMINHO_ENV = os.path.join(PROJETO_RAIZ, ".env")
++11: 
++12: 
++13: def carregar_env(caminho=None):
++14:     """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
++15: 
++16:     Não sobrescreve variáveis que já existem no ambiente. Ignora linhas em
++17:     branco, comentários (#) e valores entre aspas.
++18:     """
++19:     caminho = caminho or CAMINHO_ENV
++20:     if not os.path.isfile(caminho):
++21:         return
++22: 
++23:     with open(caminho, "r", encoding="utf-8-sig") as arquivo:
++24:         for linha in arquivo:
++25:             linha = linha.strip()
++26:             if not linha or linha.startswith("#") or "=" not in linha:
++27:                 continue
++28:             chave, _, valor = linha.partition("=")
++29:             chave = chave.strip()
++30:             valor = valor.strip().strip('"').strip("'")
++31:             if chave and chave not in os.environ:
++32:                 os.environ[chave] = valor
++33: 
++34: 
++35: def str_para_bool(valor, padrao=False):
++36:     """Converte strings comuns de booleano ('true', '1', 'sim', 's', 'yes') em bool."""
++37:     if valor is None:
++38:         return padrao
++39:     return str(valor).strip().lower() in ("1", "true", "yes", "s", "sim", "on")
++40: 
++41: 
++42: def env_int(nome, padrao):
++43:     """Lê uma variável de ambiente inteira, com fallback para o padrão."""
++44:     valor = os.environ.get(nome, "").strip()
++45:     if not valor:
++46:         return padrao
++47:     try:
++48:         return int(float(valor))
++49:     except ValueError:
++50:         return padrao
++51: 
++52: 
++53: # Lido no import: qualquer módulo que importe `src.config` já tem o .env aplicado.
++54: carregar_env()
++````
++
++## File: src/utils.py
++````python
++ 1: # src/utils.py
++ 2: import re
++ 3: 
++ 4: def formatar_telefone(telefone_bruto):
++ 5:     """
++ 6:     Limpa o telefone, identifica o tipo e gera o link do WhatsApp.
++ 7:     Retorna: (telefone_limpo, tipo, whatsapp_link)
++ 8:     """
++ 9:     if not telefone_bruto:
++10:         return "", "Não Informado", ""
++11:     
++12:     # Remove tudo que não for número
++13:     apenas_numeros = re.sub(r'\D', '', str(telefone_bruto))
++14:     
++15:     # Se o número já vier com DDI (55) e tiver 12 ou 13 dígitos, removemos o 55 
++16:     # temporariamente para classificar o tipo corretamente (Fixo/Celular)
++17:     if apenas_numeros.startswith('55') and len(apenas_numeros) > 11:
++18:         numero_sem_ddi = apenas_numeros[2:]
++19:     else:
++20:         numero_sem_ddi = apenas_numeros
++21: 
++22:     # Classificação e formatação do Link
++23:     if len(numero_sem_ddi) == 11: # Celular com 9 dígito
++24:         tipo = "Celular"
++25:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
++26:     elif len(numero_sem_ddi) == 10: # Fixo
++27:         tipo = "Fixo"
++28:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
++29:     elif len(apenas_numeros) > 0:
++30:         tipo = "Desconhecido"
++31:         whatsapp_link = f"https://wa.me/{apenas_numeros}"
++32:     else:
++33:         return "", "Não Informado", ""
++34:         
++35:     # Retorna apenas os números na coluna telefone, o tipo e o link pronto
++36:     return apenas_numeros, tipo, whatsapp_link
++````
++
++## File: .gitkeep
++````
++1: 
++````
++
++## File: requirements.txt
++````
++1: pandas
++2: openpyxl
++3: instagpy
++4: pip-system-certs
++5: playwright
++6: chromium
++7: geopy
++8: duckdb
++9: requests
++````
++
+ ## File: memory/00-resumo-projeto.md
+ ````markdown
+  1: # 00 — Resumo do Projeto
+@@ -73,70 +270,72 @@ requirements.txt
+  6: - **Processo:** divide a busca por bairros, raspa o Google Maps com Playwright em
+  7:   multithread e extrai nome, telefone, Instagram e site.
+  8: - **Saída:** leads no DuckDB (`data/leads.duckdb`) + Excel em `output/`.
+- 9: - **Extra:** dispara mensagens de WhatsApp via WAHA para leads já coletados.
+-10: 
+-11: ## Fluxo de alto nível
++ 9: - **Extra:** dispara mensagens de WhatsApp via WAHA para leads já coletados, com
++10:   templates reutilizáveis, filtros (número/cidade/nicho), teste de envio e cache
++11:   do chatId resolvido (`@lid`/`@c.us`).
+ 12: 
+-13: ```
+-14: menu (src/main.py)
+-15:   └─ 1 Coletar    → locations.obter_termos_busca(cidade, uf)
+-16:                   → scraper.rodar_scraper_multithread(...)
+-17:                   → database.LeadDatabase.save_leads (UPSERT incremental)
+-18:                   → database.export_to_excel
+-19:   └─ 2 WhatsApp   → database.get_leads_para_envio
+-20:                   → whatsapp.disparar_campanha (WAHA)
+-21:   └─ 3 Sincronizar localidades (IBGE) → locations.sincronizar_base_localidades
+-22:   └─ 4 Aquecer bairros de uma UF       → locations.aquecer_bairros_uf
+-23:   └─ 5 Sair
+-24: ```
+-25: 
+-26: ## Stack
++13: ## Fluxo de alto nível
++14: 
++15: ```
++16: menu (src/main.py)
++17:   └─ 1 Coletar    → locations.obter_termos_busca(cidade, uf)
++18:                   → scraper.rodar_scraper_multithread(...)
++19:                   → database.LeadDatabase.save_leads (UPSERT incremental)
++20:                   → database.export_to_excel
++21:   └─ 2 WhatsApp   → template ativo → filtros → teste → database.get_leads_para_envio
++22:                   → whatsapp.disparar_campanha (WAHA, chatId via checkNumberStatus)
++23:   └─ 3 Sincronizar localidades (IBGE) → locations.sincronizar_base_localidades
++24:   └─ 4 Aquecer bairros de uma UF       → locations.aquecer_bairros_uf
++25:   └─ 5 Sair
++26: ```
+ 27: 
+-28: | Item | Tecnologia |
+-29: |---|---|
+-30: | Linguagem | Python 3.10+ (ambiente: `venv/`) |
+-31: | Scraping | Playwright (Chromium) + ThreadPoolExecutor |
+-32: | Banco | DuckDB (arquivo único, 1 processo por vez) |
+-33: | Dados | Pandas |
+-34: | Localidades | API IBGE + Nominatim/Overpass (OpenStreetMap) |
+-35: | WhatsApp | WAHA (WhatsApp HTTP API) |
+-36: | Config | `.env` carregado por `src/config.py` |
+-37: 
+-38: ## Estrutura
++28: ## Stack
++29: 
++30: | Item | Tecnologia |
++31: |---|---|
++32: | Linguagem | Python 3.10+ (ambiente: `venv/`) |
++33: | Scraping | Playwright (Chromium) + ThreadPoolExecutor |
++34: | Banco | DuckDB (arquivo único, 1 processo por vez) |
++35: | Dados | Pandas |
++36: | Localidades | API IBGE + Nominatim/Overpass (OpenStreetMap) |
++37: | WhatsApp | WAHA (WhatsApp HTTP API) |
++38: | Config | `.env` carregado por `src/config.py` |
+ 39: 
+-40: ```
+-41: map_scraper_project/
+-42: ├── data/          leads.duckdb (+ .wal transiente, ignorado no Git)
+-43: ├── memory/        esta documentação para IA
+-44: ├── output/        Excel gerado (ignorado no Git)
+-45: ├── src/
+-46: │   ├── config.py          loader do .env + helpers (bool/int)
+-47: │   ├── database.py        LeadDatabase: tabela leads, UPSERT, Excel, log WAHA
+-48: │   ├── localidades_db.py  cache IBGE em DuckDB (tabelas localidades_*)
+-49: │   ├── locations.py       IBGE + OSM + cache; sync e aquecimento por UF
+-50: │   ├── scraper.py         Playwright, multithread, anti-captcha
+-51: │   ├── utils.py           formatar_telefone → (telefone, tipo, link wa)
+-52: │   ├── whatsapp.py        envio via WAHA
+-53: │   └── main.py            menu interativo
+-54: ├── .env / .env.example
+-55: ├── requirements.txt
+-56: └── README.md
+-57: ```
+-58: 
+-59: ## Git — o que é versionado
++40: ## Estrutura
++41: 
++42: ```
++43: map_scraper_project/
++44: ├── data/          leads.duckdb (+ .wal transiente, ignorado no Git)
++45: ├── memory/        esta documentação para IA
++46: ├── output/        Excel gerado (ignorado no Git)
++47: ├── src/
++48: │   ├── config.py          loader do .env + helpers (bool/int)
++49: │   ├── database.py        LeadDatabase: leads, templates_whatsapp, UPSERT, Excel, log WAHA
++50: │   ├── localidades_db.py  cache IBGE em DuckDB (tabelas localidades_*)
++51: │   ├── locations.py       IBGE + OSM + cache; sync e aquecimento por UF
++52: │   ├── scraper.py         Playwright, multithread, anti-captcha
++53: │   ├── utils.py           formatar_telefone → (telefone, tipo, link wa)
++54: │   ├── whatsapp.py        envio via WAHA
++55: │   └── main.py            menu interativo
++56: ├── .env / .env.example
++57: ├── requirements.txt
++58: └── README.md
++59: ```
+ 60: 
+-61: | Versionado | Ignorado |
+-62: |---|---|
+-63: | `data/leads.duckdb` | `.env` (segredos) |
+-64: | `src/`, `memory/`, `README.md` | `*.duckdb.wal`, `*.duckdb.tmp` |
+-65: | `.env.example` | `*.xlsx`, `*.csv`, `*.log` |
+-66: | | `venv/`, `__pycache__/`, `sessions/` |
+-67: 
+-68: Comando de sync usado pelo mantenedor (sobrescreve o remoto):
++61: ## Git — o que é versionado
++62: 
++63: | Versionado | Ignorado |
++64: |---|---|
++65: | `data/leads.duckdb` | `.env` (segredos) |
++66: | `src/`, `memory/`, `README.md` | `*.duckdb.wal`, `*.duckdb.tmp` |
++67: | `.env.example` | `*.xlsx`, `*.csv`, `*.log` |
++68: | | `venv/`, `__pycache__/`, `sessions/` |
+ 69: 
+-70: ```powershell
+-71: git add -A; git commit -m "sync local $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
+-72: ```
++70: Comando de sync usado pelo mantenedor (sobrescreve o remoto):
++71: 
++72: ```powershell
++73: git add -A; git commit -m "sync local $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
++74: ```
+ ````
+ 
+ ## File: memory/01-arquitetura-e-modulos.md
+@@ -308,47 +507,84 @@ requirements.txt
+ 165: ```
+ 166: nome, telefone, tipo_telefone, whatsapp_link, instagram, site,
+ 167: bairro, cidade, estado, nicho, status (default 'ativo'),
+-168: data_extracao, data_envio_whatsapp, status_whatsapp (default 'pendente')
+-169: ```
+-170: 
+-171: ```python
+-172: save_leads(df) -> int          # filtra descartados, UPSERT, não apaga log WAHA
+-173: get_leads_para_envio(limite)   # ativo + Celular + pendente
+-174: marcar_envio(nome, cidade, status_whatsapp)   # 'enviado' grava data
+-175: export_to_excel(nicho, cidade) # output/leads_{nicho}_{cidade}.xlsx
+-176: close()
++168: data_extracao, data_envio_whatsapp, status_whatsapp (default 'pendente'),
++169: chat_id_waha
++170: ```
++171: 
++172: - `chat_id_waha`: cache do chatId resolvido pela WAHA (ex.: `143172869029943@lid`).
++173:   Preenchido na primeira resolução; evita chamar `/api/checkNumberStatus` de novo.
++174: 
++175: Tabela `templates_whatsapp` (criada e seedada no `__init__`):
++176: 
+ 177: ```
+-178: 
+-179: ---
++178: id INTEGER PK, mensagem, descricao, ativo BOOLEAN (default TRUE)
++179: ```
+ 180: 
+-181: ## src/whatsapp.py — WAHA
++181: - Seed idempotente do template "Apresentação Agendamento Já" (`id=1`).
+ 182: 
+ 183: ```python
+-184: WAHA_API_URL, WAHA_API_KEY, WAHA_SESSION
+-185: WAHA_ATIVO, SOMENTE_ENVIO, WAHA_INTERVALO, WAHA_LIMITE
+-186: MENSAGEM_PADRAO
+-187: enviar_texto_waha(chat_id, texto, ...)   # POST /api/sendText
+-188: disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None)
+-189: ```
+-190: 
+-191: - `chat_id` = `55DDD9XXXXXXXX@c.us` (só 11 dígitos; fixo é rejeitado).
+-192: - Placeholders: `{nome}`, `{bairro}`, `{cidade}`.
+-193: - `SOMENTE_ENVIO=true` (ou `--so-enviar`) pula o menu e vai direto ao envio.
+-194: 
+-195: ---
+-196: 
+-197: ## src/main.py — menu
++184: save_leads(df) -> int          # filtra descartados, UPSERT, não apaga log WAHA
++185: get_leads_para_envio(limite=None, numero=None, cidade=None, nicho=None)
++186:                                # ativo + Celular + pendente; filtros opcionais
++187: marcar_envio(nome, cidade, status_whatsapp)   # 'enviado' grava data
++188: salvar_chat_id_waha(nome, cidade, chat_id)    # cacheia o chatId resolvido
++189: listar_templates_ativos()      # [{id, mensagem, descricao, ativo}]
++190: export_to_excel(nicho, cidade) # output/leads_{nicho}_{cidade}.xlsx
++191: close()
++192: ```
++193: 
++194: - `get_leads_para_envio`: `numero` compara por dígitos (regex `[^0-9]` removido),
++195:   aceita parte do número; `cidade`/`nicho` são match exato.
++196: - `save_leads` **preserva** `status`, `data_envio_whatsapp`, `status_whatsapp` e
++197:   `chat_id_waha` no re-UPSERT (não sobrescreve log de envio nem o chatId).
+ 198: 
+-199: ```
+-200: 1 - Coletar leads
+-201: 2 - Enviar mensagens WhatsApp
+-202: 3 - Sincronizar base de localidades (IBGE)
+-203: 4 - Aquecer bairros de uma UF (OpenStreetMap)
+-204: 5 - Sair
+-205: ```
+-206: 
+-207: `coletar_leads()`: UF → cidade (filtro sem acento) → **confirma no IBGE e usa o
+-208: nome oficial** → nicho → termos → "Ver navegador?" → scraping → Excel.
++199: ---
++200: 
++201: ## src/whatsapp.py — WAHA
++202: 
++203: ```python
++204: WAHA_API_URL, WAHA_API_KEY, WAHA_SESSION
++205: WAHA_ATIVO, SOMENTE_ENVIO, WAHA_INTERVALO, WAHA_LIMITE
++206: MENSAGEM_PADRAO
++207: _normalizar_chatid(telefone)            # 55DDDNUMERO@c.us (clássico)
++208: _resolver_chatid_waha(telefone, ...)    # GET /api/checkNumberStatus → @lid ou @c.us
++209: _limpar_markdown_whatsapp(texto)        # **negrito** → texto; [r](u) → u
++210: _renderizar_mensagem(template, lead)    # placeholders + limpa markdown
++211: enviar_texto_waha(chat_id, texto, ...)  # POST /api/sendText
++212: enviar_texto_numero(numero, texto, ...) # resolve chatId e envia (p/ teste)
++213: disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None)
++214: ```
++215: 
++216: - **chatId:** números recentes usam `@lid`; enviar `@c.us` para eles retorna
++217:   **HTTP 500**. `_resolver_chatid_waha` consulta `/api/checkNumberStatus`
++218:   (`?session=&phone=55DDD9XXXXXXXX`) e usa o `chatId` retornado; fallback `@c.us`.
++219: - `disparar_campanha` aceita `leads` (DataFrame já filtrado). Se recebido, **não**
++220:   reconsulta o banco — respeita os filtros aplicados pelo menu.
++221: - O chatId resolvido é **cacheado** via `db.salvar_chat_id_waha` (só resolve na
++222:   primeira vez; reenvios pulam o checkNumberStatus).
++223: - Placeholders: `{nome}`, `{bairro}`, `{cidade}`.
++224: - `SOMENTE_ENVIO=true` (ou `--so-enviar`) pula o menu e vai direto ao envio.
++225: 
++226: ---
++227: 
++228: ## src/main.py — menu
++229: 
++230: ```
++231: 1 - Coletar leads
++232: 2 - Enviar mensagens WhatsApp
++233: 3 - Sincronizar base de localidades (IBGE)
++234: 4 - Aquecer bairros de uma UF (OpenStreetMap)
++235: 5 - Sair
++236: ```
++237: 
++238: `coletar_leads()`: UF → cidade (filtro sem acento) → **confirma no IBGE e usa o
++239: nome oficial** → nicho → termos → "Ver navegador?" → scraping → Excel.
++240: 
++241: `enviar_whatsapp_menu()`: escolhe **template ativo** → aplica **filtros de envio**
++242: (0 todos / 1 por número / 2 por cidade / 3 por nicho) → pergunta se quer
++243: **teste de envio** (digitar número ou escolher um lead pendente) → lista os
++244: pendentes filtrados e confirma o disparo. Helpers: `_confirmar`,
++245: `_escolher_template`, `_escolher_filtros`, `testar_envio`.
+ ````
+ 
+ ## File: memory/02-decisoes-e-armadilhas.md
+@@ -472,227 +708,68 @@ requirements.txt
+ 117: 
+ 118: ---
+ 119: 
+-120: ## `.env` e Git
++120: ## WAHA: chatId `@c.us` vs `@lid` (HTTP 500)
+ 121: 
+-122: - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.
+-123: - Formato: `CHAVE=VALOR`. Comentários só em **linha própria** — comentário na
+-124:   mesma linha vira parte do valor (`WAHA_LIMITE= # vazio` → `" # vazio"`).
+-125: - Não use `export`/aspas desnecessárias; o loader tira aspas simples/duplas.
+-126: - Nunca imprima nem comite segredos.
+-127: 
+-128: ---
+-129: 
+-130: ## Scraping: seletores frágeis
+-131: 
+-132: Dependem do DOM do Google Maps (podem mudar sem aviso):
+-133: 
+-134: | Dado | Seletor |
+-135: |---|---|
+-136: | lista de resultados | `div[role="feed"]` |
+-137: | links de perfis | `a[href*="/maps/place/"]` |
+-138: | nome | `h1` (ignora "Resultados" e vazio) |
+-139: | endereço | `button[data-item-id="address"]` (`aria-label`) |
+-140: | telefone | `button[data-item-id^="phone:tel:"]` (`aria-label`) |
+-141: | site | `a[data-item-id="authority"]` |
+-142: | Instagram | primeiro `a[href]` contendo `instagram.com` |
+-143: 
+-144: Bairro é extraído do endereço: `"Rua X, 123 - Bairro, Cidade - UF"` → parte
+-145: entre `" - "` e `","`. Se não casar, `"Não Informado"`.
+-146: 
+-147: ---
+-148: 
+-149: ## Concorrência
+-150: 
+-151: - `save_callback` é chamado **na thread principal** (dentro do loop de
+-152:   `as_completed`), então não há escrita concorrente no DuckDB.
+-153: - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
+-154: - `lock` protege a lista `vistos`/`todos_leads`.
+-155: 
+-156: ---
+-157: 
+-158: ## Coisas que parecem bug mas não são
+-159: 
+-160: - `"IBGE não publica bairros para X"` → cidade com 1 distrito (ver acima).
+-161: - `"Base local ... sem bairros (fonte: cidade)"` → já tentou, o OSM não tinha nada.
+-162: - `"LOCALIDADES_SALVAR=false: a base local não será alterada"` → modo leitura.
+-163: - `"Aviso: base local ... indisponível (arquivo em uso)"` → feche o DBeaver.
+-````
+-
+-## File: memory/04-como-contribuir.md
+-````markdown
+- 1: # 04 — Como Contribuir: Padrões e Boas Práticas
+- 2: 
+- 3: Este documento detalha os padrões de código, estilo e comunicação esperados
+- 4: para novas contribuições, visando manter a consistência e facilitar a manutenção.
+- 5: 
+- 6: ---
+- 7: 
+- 8: ## 1. Organização de Código e Nomenclatura
+- 9: 
+-10: - **Imports:** Sempre absolutos, começando da raiz `src/`. Ex: `from src.config import ...`.
+-11: - **Constantes:** `MAIUSCULAS_COM_UNDERLINE`.
+-12: - **Funções privadas (internas ao módulo):** `_nome_da_funcao_privada` (com underscore inicial).
+-13: - **Variáveis locais:** `snake_case`.
+-14: - **Classes:** `CamelCase`.
+-15: - **Parâmetros de função:** `snake_case`.
+-16: 
+-17: ---
+-18: 
+-19: ## 2. Logs e Interação com o Usuário
+-20: 
+-21: - **Prints de progresso:** Use `print(f"[{area_da_busca}] Mensagem...")`.
+-22:   O `[área]` (ex: `[Canoas-RS]`, `[Assis Brasil]`) ajuda a identificar qual thread
+-23:   ou cidade está processando no momento.
+-24: - **Mensagens de erro:** Inclua `type(e).__name__` e `str(e)[:N]` para facilitar
+-25:   a depuração em ambientes remotos ou com logs limitados.
+-26: - **Interação:** Use `input()` para entradas do usuário no console. Evite `print()`
+-27:   seguido de `input()` em linhas separadas para prompts, a menos que seja intencional.
+-28: - **Mensagens para o usuário:** Devem ser claras e úteis, preferencialmente
+-29:   em português (padrão atual do projeto).
+-30: 
+-31: ---
+-32: 
+-33: ## 3. Variáveis de Ambiente e Configuração
+-34: 
+-35: - **Todas as configurações** devem ser lidas do `.env` via `src/config.py`.
+-36: - **Nunca faça hardcode** de URLs de APIs, chaves, limites, etc.
+-37: - **Novas variáveis:** Adicione ao `.env.example` com comentários explicativos.
+-38: - **Semântica:** Use `true`/`false` para booleanos, números para inteiros.
+-39:   O `src/config.py` já tem helpers para isso (`str_para_bool`, `env_int`).
+-40: 
+-41: ---
+-42: 
+-43: ## 4. Testes e Validação
+-44: 
+-45: - **Testes unitários/de integração:** Idealmente, adicione pequenos scripts de
+-46:   validação (como os que o modelo Gemini tem feito) para cobrir novas features
+-47:   ou refatorações.
+-48: - **DuckDB:** Para testes que não devem tocar no banco real, use um arquivo
+-49:   DuckDB temporário (`tempfile.gettempdir()`) e defina `localidades_db.DB_PATH_PADRAO`.
+-50: - **Encoding:** Mantenha os arquivos em **UTF-8 sem BOM**.
+-51:   Valide a acentuação após edições em lote: procure caracteres de dupla
+-52:   codificação (por exemplo, `A` com til U+00C3 seguido de símbolo de moeda).
+-53: 
+-54: ---
+-55: 
+-56: ## 5. Documentação
+-57: 
+-58: - **`README.md` (raiz):** Manual do usuário, instalação, execução, fluxo geral.
+-59: - **`memory/`:** Resumos densos para modelos de IA. **Atualize ao mudar comportamento**.
+-60:   - `00-resumo-projeto.md`: alto nível.
+-61:   - `01-arquitetura-e-modulos.md`: detalhe de cada módulo.
+-62:   - `02-decisoes-e-armadilhas.md`: o "porquê" das decisões, bugs conhecidos.
+-63:   - `03-historico-de-mudancas.md`: log recente das mudanças importantes.
+-64: - **Docstrings:** Use docstrings Python para explicar funções e classes.
+-65: - **Comentários de código:** Breves e pontuais, explicando lógica complexa ou escolhas não óbvias.
+-````
+-
+-## File: src/__init__.py
+-````python
+-1: 
+-````
+-
+-## File: src/config.py
+-````python
+- 1: # src/config.py
+- 2: """Carregamento centralizado do arquivo .env e leitura de flags.
+- 3: 
+- 4: Todos os módulos importam este arquivo, então o `.env` é lido uma única vez
+- 5: por processo, antes de qualquer constante de configuração ser calculada.
+- 6: """
+- 7: import os
+- 8: 
+- 9: PROJETO_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+-10: CAMINHO_ENV = os.path.join(PROJETO_RAIZ, ".env")
+-11: 
+-12: 
+-13: def carregar_env(caminho=None):
+-14:     """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
+-15: 
+-16:     Não sobrescreve variáveis que já existem no ambiente. Ignora linhas em
+-17:     branco, comentários (#) e valores entre aspas.
+-18:     """
+-19:     caminho = caminho or CAMINHO_ENV
+-20:     if not os.path.isfile(caminho):
+-21:         return
+-22: 
+-23:     with open(caminho, "r", encoding="utf-8-sig") as arquivo:
+-24:         for linha in arquivo:
+-25:             linha = linha.strip()
+-26:             if not linha or linha.startswith("#") or "=" not in linha:
+-27:                 continue
+-28:             chave, _, valor = linha.partition("=")
+-29:             chave = chave.strip()
+-30:             valor = valor.strip().strip('"').strip("'")
+-31:             if chave and chave not in os.environ:
+-32:                 os.environ[chave] = valor
+-33: 
+-34: 
+-35: def str_para_bool(valor, padrao=False):
+-36:     """Converte strings comuns de booleano ('true', '1', 'sim', 's', 'yes') em bool."""
+-37:     if valor is None:
+-38:         return padrao
+-39:     return str(valor).strip().lower() in ("1", "true", "yes", "s", "sim", "on")
+-40: 
+-41: 
+-42: def env_int(nome, padrao):
+-43:     """Lê uma variável de ambiente inteira, com fallback para o padrão."""
+-44:     valor = os.environ.get(nome, "").strip()
+-45:     if not valor:
+-46:         return padrao
+-47:     try:
+-48:         return int(float(valor))
+-49:     except ValueError:
+-50:         return padrao
+-51: 
+-52: 
+-53: # Lido no import: qualquer módulo que importe `src.config` já tem o .env aplicado.
+-54: carregar_env()
+-````
+-
+-## File: src/utils.py
+-````python
+- 1: # src/utils.py
+- 2: import re
+- 3: 
+- 4: def formatar_telefone(telefone_bruto):
+- 5:     """
+- 6:     Limpa o telefone, identifica o tipo e gera o link do WhatsApp.
+- 7:     Retorna: (telefone_limpo, tipo, whatsapp_link)
+- 8:     """
+- 9:     if not telefone_bruto:
+-10:         return "", "Não Informado", ""
+-11:     
+-12:     # Remove tudo que não for número
+-13:     apenas_numeros = re.sub(r'\D', '', str(telefone_bruto))
+-14:     
+-15:     # Se o número já vier com DDI (55) e tiver 12 ou 13 dígitos, removemos o 55 
+-16:     # temporariamente para classificar o tipo corretamente (Fixo/Celular)
+-17:     if apenas_numeros.startswith('55') and len(apenas_numeros) > 11:
+-18:         numero_sem_ddi = apenas_numeros[2:]
+-19:     else:
+-20:         numero_sem_ddi = apenas_numeros
+-21: 
+-22:     # Classificação e formatação do Link
+-23:     if len(numero_sem_ddi) == 11: # Celular com 9 dígito
+-24:         tipo = "Celular"
+-25:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
+-26:     elif len(numero_sem_ddi) == 10: # Fixo
+-27:         tipo = "Fixo"
+-28:         whatsapp_link = f"https://wa.me/55{numero_sem_ddi}"
+-29:     elif len(apenas_numeros) > 0:
+-30:         tipo = "Desconhecido"
+-31:         whatsapp_link = f"https://wa.me/{apenas_numeros}"
+-32:     else:
+-33:         return "", "Não Informado", ""
+-34:         
+-35:     # Retorna apenas os números na coluna telefone, o tipo e o link pronto
+-36:     return apenas_numeros, tipo, whatsapp_link
+-````
+-
+-## File: .gitkeep
+-````
+-1: 
++122: Enviar `POST /api/sendText` com `chatId = 55DDDNUMERO@c.us` **falha com HTTP 500**
++123: para números recentes do WhatsApp. Esses números foram migrados para o formato
++124: **`@lid`** (hidden user ID).
++125: 
++126: - Diagnóstico: `GET /api/checkNumberStatus?session=default&phone=55DDD9XXXXXXXX`
++127:   responde `{"numberExists": true, "chatId": "143172869029943@lid"}`.
++128: - Correção: **sempre resolver o chatId via `checkNumberStatus` antes de enviar**,
++129:   em vez de montar `@c.us` na mão (é o que a documentação da WAHA recomenda para
++130:   números brasileiros).
++131: - O chatId resolvido é **cacheado** na coluna `leads.chat_id_waha` — a consulta
++132:   extra só acontece uma vez por lead.
++133: - ⚠️ O payload do `sendText` está correto (`{session, chatId, text}` + header
++134:   `X-Api-Key`); o erro 500 era **só** o formato do `chatId`, não o endpoint.
++135: 
++136: ---
++137: 
++138: ## `.env` e Git
++139: 
++140: - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.
++141: - Formato: `CHAVE=VALOR`. Comentários só em **linha própria** — comentário na
++142:   mesma linha vira parte do valor (`WAHA_LIMITE= # vazio` → `" # vazio"`).
++143: - Não use `export`/aspas desnecessárias; o loader tira aspas simples/duplas.
++144: - Nunca imprima nem comite segredos.
++145: 
++146: ---
++147: 
++148: ## Scraping: seletores frágeis
++149: 
++150: Dependem do DOM do Google Maps (podem mudar sem aviso):
++151: 
++152: | Dado | Seletor |
++153: |---|---|
++154: | lista de resultados | `div[role="feed"]` |
++155: | links de perfis | `a[href*="/maps/place/"]` |
++156: | nome | `h1` (ignora "Resultados" e vazio) |
++157: | endereço | `button[data-item-id="address"]` (`aria-label`) |
++158: | telefone | `button[data-item-id^="phone:tel:"]` (`aria-label`) |
++159: | site | `a[data-item-id="authority"]` |
++160: | Instagram | primeiro `a[href]` contendo `instagram.com` |
++161: 
++162: Bairro é extraído do endereço: `"Rua X, 123 - Bairro, Cidade - UF"` → parte
++163: entre `" - "` e `","`. Se não casar, `"Não Informado"`.
++164: 
++165: ---
++166: 
++167: ## Concorrência
++168: 
++169: - `save_callback` é chamado **na thread principal** (dentro do loop de
++170:   `as_completed`), então não há escrita concorrente no DuckDB.
++171: - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
++172: - `lock` protege a lista `vistos`/`todos_leads`.
++173: 
++174: ---
++175: 
++176: ## Coisas que parecem bug mas não são
++177: 
++178: - `"IBGE não publica bairros para X"` → cidade com 1 distrito (ver acima).
++179: - `"Base local ... sem bairros (fonte: cidade)"` → já tentou, o OSM não tinha nada.
++180: - `"LOCALIDADES_SALVAR=false: a base local não será alterada"` → modo leitura.
++181: - `"Aviso: base local ... indisponível (arquivo em uso)"` → feche o DBeaver.
+ ````
+ 
+ ## File: .repomixignore
+@@ -776,156 +853,19 @@ requirements.txt
+ 30:     }
+ 31:   },
+ 32:   "include": [],
+-33:   "ignore": {
+-34:     "useGitignore": true,
+-35:     "useDotIgnore": true,
+-36:     "useDefaultPatterns": true,
+-37:     "customPatterns": []
+-38:   },
+-39:   "security": {
+-40:     "enableSecurityCheck": true
+-41:   },
+-42:   "tokenCount": {
+-43:     "encoding": "o200k_base"
+-44:   }
+-45: }
+-````
+-
+-## File: requirements.txt
+-````
+-1: pandas
+-2: openpyxl
+-3: instagpy
+-4: pip-system-certs
+-5: playwright
+-6: chromium
+-7: geopy
+-8: duckdb
+-9: requests
+-````
+-
+-## File: memory/03-historico-de-mudancas.md
+-````markdown
+-  1: # 03 — Histórico de Mudanças
+-  2: 
+-  3: Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
+-  4: 
+-  5: ---
+-  6: 
+-  7: ## 2026-10-29
+-  8: 
+-  9: ### Memória do projeto para IA
+- 10: 
+- 11: - Criada a pasta `memory/` com documentação densa para reduzir custo de contexto.
+- 12: - Arquivos: `README.md`, `00-resumo-projeto.md`, `01-arquitetura-e-modulos.md`,
+- 13:   `02-decisoes-e-armadilhas.md`, `03-historico-de-mudancas.md`,
+- 14:   `04-como-contribuir.md` (padrões de código, logs, config, testes e docs).
+- 15: - `README.md` limpo: removido o bloco "env temp:" (dump cru do `.env`) e
+- 16:   adicionadas as seções 12 (memória para IA) e 13 (observação sobre configuração).
+- 17: 
+- 18: ### Correção: cache de bairros ignorado (`bairros_fonte`)
+- 19: 
+- 20: - **Sintoma:** com `LOCALIDADES_USAR_CACHE=true` e base populada, a coleta ainda
+- 21:   consultava IBGE e Overpass.
+- 22: - **Causa:** `localidades_db.ler_municipios()` não retornava `bairros_fonte`;
+- 23:   `_resolver_municipio` repassava `None`, então o cache nunca era considerado.
+- 24: - **Correção:** query passou a trazer `uf` e `bairros_fonte`; o resolver repassa
+- 25:   o valor real.
+- 26: - **Teste:** com as funções de rede trocadas por `AssertionError`, os bairros de
+- 27:   Canoas (fonte `overpass`) e Bento Gonçalves (fonte `ibge`) vieram do banco.
+- 28: 
+- 29: ### Nome oficial do município (IBGE) na coleta
+- 30: 
+- 31: - `obter_municipio(cidade, uf)` confirma o município e devolve `id_municipio`,
+- 32:   `nome` oficial e `uf`.
+- 33: - `filtrar_cidades(cidades, termo)` compara **sem acento e sem caixa**:
+- 34:   `canoas`, `sao leopoldo`, `CHAPECO` funcionam.
+- 35: - `main.coletar_leads()` passa a usar o nome oficial no scraping, no banco e no
+- 36:   nome do Excel, e imprime `Município (IBGE): Canoas-RS | código 4304606`.
+- 37: - Lista de municípios **memoizada** por execução (`_municipios_da_uf`), evitando
+- 38:   rebaixar a lista da UF a cada cidade (principalmente com `SALVAR=false`).
+- 39: 
+- 40: ### Mensagens de bairros mais honestas
+- 41: 
+- 42: - Antes: `IBGE retornou 0 distrito(s) útil(eis)`.
+- 43: - Agora: `IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).`
+- 44: - Motivo: a API de Localidades do IBGE **não tem bairros** (só distritos).
+- 45: 
+- 46: ### Aquecimento de bairros por UF (menu 4)
+- 47: 
+- 48: - `locations.aquecer_bairros_uf(uf, cidades=None, max_cidades=0, pausa_segundos=None)`.
+- 49: - `localidades_db.ler_municipios_pendentes(uf)` → só `bairros_fonte IS NULL`.
+- 50: - Retoma de onde parou; `Ctrl+C` preserva o que já foi gravado.
+- 51: - Pausa (`AQUECER_PAUSA_SEGUNDOS`, default 2) só quando a cidade usou o OSM.
+- 52: - Falha de rede não grava nada (`falhas` no resumo) e a cidade continua pendente.
+- 53: - Bloqueado quando `LOCALIDADES_SALVAR=false`.
+- 54: - Medido: AC 21 → 18 → 17 pendentes; SP 621 → 616.
+- 55: 
+- 56: ### Flag `LOCALIDADES_SALVAR`
+- 57: 
+- 58: - `false` = somente leitura: nenhuma escrita, **nem criação de tabelas**
+- 59:   (`localidades_db.CRIAR_TABELAS = False`) e menus 3/4 desativados.
+- 60: - Todas as escritas passam por `_salvar()`, que respeita a flag.
+- 61: - Aviso único por execução para não poluir o log.
+- 62: 
+- 63: ### `.env` e `.env.example` comentados
+- 64: 
+- 65: - Cada variável com explicação, faixa de valores e efeito colateral.
+- 66: - Tabela das 4 combinações `USAR_CACHE × SALVAR`.
+- 67: - Regra explícita: comentário só em linha própria.
+- 68: - Valores locais preservados (`USAR_CACHE=false` → depois `true`).
+- 69: 
+- 70: ### Base de localidades offline (IBGE) — menu 3
+- 71: 
+- 72: - Novo `src/localidades_db.py` com tabelas `localidades_estados`,
+- 73:   `localidades_municipios`, `localidades_bairros` no mesmo `leads.duckdb`.
+- 74: - `src/config.py` centraliza o loader do `.env` (antes duplicado no `whatsapp.py`).
+- 75: - `src/locations.py` reescrito: cache → API → grava.
+- 76: - Sync nacional: 27 estados, 5.571 municípios, 10.751 distritos; 643 cidades com
+- 77:   bairros prontos pelo IBGE.
+- 78: - Fallback OSM por cidade, gravado uma única vez.
+- 79: 
+- 80: ### Anti-captcha / bloqueio do Google Maps
+- 81: 
+- 82: - Detecção por URL `/sorry/`, seletores de captcha e textos ("tráfego incomum").
+- 83: - Retry com pausa longa (`CAPTCHA_PAUSA_SEGUNDOS`) e **cooldown global**
+- 84:   (`CAPTCHA_PAUSA_GLOBAL_SEGUNDOS`) entre todas as threads.
+- 85: - Bloqueio persistente → aborta a área e **preserva os leads já extraídos**.
+- 86: - Testado com Playwright real: página normal passa, página de captcha levanta
+- 87:   `BloqueioDetectado` após `CAPTCHA_MAX_TENTATIVAS`.
+- 88: 
+- 89: ### Correção: menu não aparecia
+- 90: 
+- 91: - `src/main.py` definia `menu_interativo()` mas **nunca chamava**.
+- 92: - Adicionado `if __name__ == "__main__": menu_interativo()`.
+- 93: 
+- 94: ### Banco DuckDB versionado
+- 95: 
+- 96: - `data/leads.duckdb` passou a ser versionado no Git.
+- 97: - `.gitignore`: removidos `data/` e `*.duckdb` da lista de ignore; adicionados
+- 98:   `*.duckdb.wal` e `*.duckdb.tmp`.
+- 99: - `*.xlsx`, `*.csv`, `*.log` continuam ignorados (confirmado com
+-100:   `git check-ignore` e `git ls-files`).
+-101: - ⚠️ Comitar com o programa aberto sobe o `.duckdb` sem o `.wal` (dados
+-102:   desatualizados). Fechar antes.
+-103: 
+-104: ---
+-105: 
+-106: ## Pendências / próximos passos
+-107: 
+-108: | Item | Status |
+-109: |---|---|
+-110: | Bairros oficiais via CNEFE 2022 | **Não implementar por hora** (decisão do mantenedor) |
+-111: | Resolução automática de captcha (2Captcha/CapMonster) | Não implementado; hoje pausa e desiste da área |
+-112: | Enriquecimento de e-mail a partir dos sites | Não iniciado |
+-113: | Base de bairros offline nacional | Coberto parcialmente pelo IBGE (643 cidades) |
+-114: 
+-115: ## Problemas conhecidos (ambiente)
+-116: 
+-117: - **DBeaver aberto trava o DuckDB** → cache cai para as APIs.
+-118: - **Overpass/Nominatim instáveis** (502, timeout) → aquecimento por UF precisa de
+-119:   paciência e retomadas.
+-120: - Interprete global do mantenedor é Python 3.15; **usar `venv\Scripts\python.exe`**.
++33:   "ignore": {
++34:     "useGitignore": true,
++35:     "useDotIgnore": true,
++36:     "useDefaultPatterns": true,
++37:     "customPatterns": []
++38:   },
++39:   "security": {
++40:     "enableSecurityCheck": true
++41:   },
++42:   "tokenCount": {
++43:     "encoding": "o200k_base"
++44:   }
++45: }
+ ````
+ 
+ ## File: memory/README.md
+@@ -962,278 +902,17 @@ requirements.txt
+ 30: 
+ 31: - `README.md` (raiz) — manual do usuário, instalação, uso.
+ 32: - `.env.example` — valores e comentários de cada variável.
+-````
+-
+-## File: src/database.py
+-````python
+-  1: # src/database.py
+-  2: import duckdb
+-  3: import pandas as pd
+-  4: import os
+-  5: from datetime import datetime
+-  6: 
+-  7: class LeadDatabase:
+-  8:     def __init__(self, db_path="data/leads.duckdb"):
+-  9:         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+- 10:         self.db_path = db_path
+- 11:         self.conn = duckdb.connect(self.db_path)
+- 12:         self._create_table()
+- 13:         self._ensure_whatsapp_columns()
+- 14: 
+- 15:     def _create_table(self):
+- 16:         self.conn.execute("""
+- 17:             CREATE TABLE IF NOT EXISTS leads (
+- 18:                 nome VARCHAR,
+- 19:                 telefone VARCHAR,
+- 20:                 tipo_telefone VARCHAR,
+- 21:                 whatsapp_link VARCHAR,
+- 22:                 instagram VARCHAR,
+- 23:                 site VARCHAR,
+- 24:                 bairro VARCHAR,
+- 25:                 cidade VARCHAR,
+- 26:                 estado VARCHAR,
+- 27:                 nicho VARCHAR,
+- 28:                 status VARCHAR DEFAULT 'ativo',
+- 29:                 data_extracao TIMESTAMP,
+- 30:                 data_envio_whatsapp TIMESTAMP,
+- 31:                 status_whatsapp VARCHAR DEFAULT 'pendente',
+- 32:                 PRIMARY KEY (nome, cidade)
+- 33:             )
+- 34:         """)
+- 35: 
+- 36:     def _ensure_whatsapp_columns(self):
+- 37:         """Adiciona as colunas de log de WhatsApp em bancos criados antes da migração."""
+- 38:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
+- 39:         if 'data_envio_whatsapp' not in colunas:
+- 40:             self.conn.execute("ALTER TABLE leads ADD COLUMN data_envio_whatsapp TIMESTAMP")
+- 41:         if 'status_whatsapp' not in colunas:
+- 42:             self.conn.execute("ALTER TABLE leads ADD COLUMN status_whatsapp VARCHAR DEFAULT 'pendente'")
+- 43: 
+- 44:     def save_leads(self, df: pd.DataFrame):
+- 45:         if df.empty:
+- 46:             return 0
+- 47:         
+- 48:         descartados_db = self.conn.execute("SELECT nome, cidade FROM leads WHERE status = 'descartado'").fetchall()
+- 49:         descartados_set = set(descartados_db)
+- 50:         
+- 51:         df = df[~df.apply(lambda row: (row['nome'], row['cidade']) in descartados_set, axis=1)]
+- 52:         
+- 53:         if df.empty:
+- 54:             print("Todos os leads coletados já foram descartados anteriormente. Pulando salvamento.")
+- 55:             return 0
+- 56:             
+- 57:         df['data_extracao'] = datetime.now()
+- 58:         
+- 59:         if 'status' not in df.columns:
+- 60:             df['status'] = 'ativo'
+- 61: 
+- 62:         self.conn.register('df_temp', df)
+- 63: 
+- 64:         # UPSERT preservando o status atual e as colunas de log do WhatsApp.
+- 65:         # Assim, re-raspar um lead já enviado NÃO apaga data_envio_whatsapp/status_whatsapp.
+- 66:         self.conn.execute("""
+- 67:             INSERT INTO leads (nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao)
+- 68:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao
+- 69:             FROM df_temp
+- 70:             ON CONFLICT (nome, cidade) DO UPDATE SET
+- 71:                 telefone = excluded.telefone,
+- 72:                 tipo_telefone = excluded.tipo_telefone,
+- 73:                 whatsapp_link = excluded.whatsapp_link,
+- 74:                 instagram = excluded.instagram,
+- 75:                 site = excluded.site,
+- 76:                 bairro = excluded.bairro,
+- 77:                 estado = excluded.estado,
+- 78:                 nicho = excluded.nicho,
+- 79:                 data_extracao = excluded.data_extracao
+- 80:         """)
+- 81: 
+- 82:         self.conn.unregister('df_temp')
+- 83:         return len(df)
+- 84: 
+- 85:     def get_leads_para_envio(self, limite=None):
+- 86:         """Retorna leads ativos, celulares e ainda não enviados (evita spam/fixo)."""
+- 87:         query = """
+- 88:             SELECT nome, telefone, whatsapp_link, bairro, cidade, estado, nicho
+- 89:             FROM leads
+- 90:             WHERE status = 'ativo'
+- 91:               AND tipo_telefone = 'Celular'
+- 92:               AND (status_whatsapp IS NULL OR status_whatsapp = 'pendente')
+- 93:             ORDER BY cidade, bairro, nome
+- 94:         """
+- 95:         if limite:
+- 96:             query += f" LIMIT {int(limite)}"
+- 97:         return self.conn.execute(query).df()
+- 98: 
+- 99:     def marcar_envio(self, nome, cidade, status_whatsapp):
+-100:         """Registra o resultado do envio. 'data_envio_whatsapp' é gravado apenas no sucesso."""
+-101:         if status_whatsapp == 'enviado':
+-102:             self.conn.execute("""
+-103:                 UPDATE leads
+-104:                 SET status_whatsapp = ?, data_envio_whatsapp = ?
+-105:                 WHERE nome = ? AND cidade = ?
+-106:             """, [status_whatsapp, datetime.now(), nome, cidade])
+-107:         else:
+-108:             self.conn.execute("""
+-109:                 UPDATE leads
+-110:                 SET status_whatsapp = ?
+-111:                 WHERE nome = ? AND cidade = ?
+-112:             """, [status_whatsapp, nome, cidade])
+-113: 
+-114:     def export_to_excel(self, nicho: str, cidade: str):
+-115:         df = self.conn.execute("""
+-116:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, data_extracao 
+-117:             FROM leads 
+-118:             WHERE nicho = ? AND cidade = ? AND status = 'ativo'
+-119:             ORDER BY bairro, nome
+-120:         """, [nicho, cidade]).df()
+-121:         
+-122:         if df.empty:
+-123:             print("Nenhum dado ativo para exportar.")
+-124:             return
+-125:             
+-126:         os.makedirs("output", exist_ok=True)
+-127:         nome_arquivo = f"output/leads_{nicho}_{cidade}.xlsx".replace(" ", "_").lower()
+-128:         df.to_excel(nome_arquivo, index=False)
+-129:         print(f"🎉 Exportação concluída: {nome_arquivo} ({len(df)} leads ativos)")
+-130: 
+-131:     def close(self):
+-132:         self.conn.close()
+-````
+-
+-## File: src/whatsapp.py
+-````python
+-  1: # src/whatsapp.py
+-  2: """Integração com a WAHA (WhatsApp HTTP API) para envio de mensagens aos leads.
+-  3: 
+-  4: Configuração via variáveis de ambiente:
+-  5:     WAHA_API_URL   -> URL base da WAHA (padrão: http://localhost:3000)
+-  6:     WAHA_API_KEY   -> chave de API da WAHA (obrigatória se a instância exigir)
+-  7:     WAHA_SESSION   -> nome da sessão conectada na WAHA (padrão: "default")
+-  8: 
+-  9: O módulo só envia para leads:
+- 10:     - status = 'ativo'
+- 11:     - tipo_telefone = 'Celular'  (nunca fixo)
+- 12:     - ainda não enviados (status_whatsapp = 'pendente' ou NULL)
+- 13: """
+- 14: import os
+- 15: import re
+- 16: import time
+- 17: 
+- 18: import requests
+- 19: 
+- 20: from src.config import carregar_env, str_para_bool
+- 21: 
+- 22: carregar_env()
+- 23: 
+- 24: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
+- 25: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
+- 26: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
+- 27: 
+- 28: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
+- 29: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
+- 30: 
+- 31: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
+- 32: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
+- 33: 
+- 34: # Intervalo (segundos) entre envios e limite de leads por campanha.
+- 35: # WAHA_LIMITE vazio = sem limite (envia todos os pendentes).
+- 36: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
+- 37: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
+- 38: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
+- 39: 
+- 40: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
+- 41: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
+- 42: 
+- 43: 
+- 44: def _normalizar_chatid(telefone):
+- 45:     """Converte o telefone salvo em um chatId do WAHA (55DDDNUMERO@c.us)."""
+- 46:     numero = re.sub(r"\D", "", str(telefone or ""))
+- 47:     if not numero:
+- 48:         return None
+- 49: 
+- 50:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
+- 51:     if numero.startswith("55") and len(numero) > 11:
+- 52:         numero = numero[2:]
+- 53: 
+- 54:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
+- 55:     if len(numero) != 11:
+- 56:         return None
+- 57: 
+- 58:     return f"55{numero}@c.us"
+- 59: 
+- 60: 
+- 61: def _renderizar_mensagem(template, lead):
+- 62:     """Substitui {nome}, {bairro} e {cidade} de forma segura (sem quebrar com chaves soltas)."""
+- 63:     bairro = str(lead.get("bairro") or "sua região")
+- 64:     cidade = str(lead.get("cidade") or "")
+- 65:     return (
+- 66:         template
+- 67:         .replace("{nome}", str(lead.get("nome") or ""))
+- 68:         .replace("{bairro}", bairro)
+- 69:         .replace("{cidade}", cidade)
+- 70:     )
+- 71: 
+- 72: 
+- 73: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
+- 74:     """Envia uma mensagem de texto via WAHA."""
+- 75:     session = session or WAHA_SESSION
+- 76:     api_url = api_url or WAHA_API_URL
+- 77:     api_key = api_key if api_key is not None else WAHA_API_KEY
+- 78:     url = f"{api_url.rstrip('/')}/api/sendText"
+- 79: 
+- 80:     payload = {
+- 81:         "session": session,
+- 82:         "chatId": chat_id,
+- 83:         "text": texto,
+- 84:     }
+- 85: 
+- 86:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
+- 87:     if api_key:
+- 88:         headers["X-Api-Key"] = api_key
+- 89: 
+- 90:     response = requests.post(url, json=payload, headers=headers, timeout=30)
+- 91:     response.raise_for_status()
+- 92:     return response.json()
+- 93: 
+- 94: 
+- 95: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None):
+- 96:     """Envia mensagens para todos os leads celulares pendentes.
+- 97: 
+- 98:     - db: instância de LeadDatabase
+- 99:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
+-100:     - intervalo: pausa em segundos entre envios (evita spam e banimento)
+-101:     """
+-102:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
+-103:     leads = db.get_leads_para_envio(limite)
+-104: 
+-105:     if leads.empty:
+-106:         print("Nenhum lead celular pendente de envio.")
+-107:         return
+-108: 
+-109:     total = len(leads)
+-110:     print(f"Enviando para {total} lead(s) celular(es), com intervalo de {intervalo}s...")
+-111: 
+-112:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
+-113:         chat_id = _normalizar_chatid(lead.get("telefone"))
+-114:         if not chat_id:
+-115:             db.marcar_envio(lead["nome"], lead["cidade"], "falhou")
+-116:             print(f"[{i}/{total}] {lead['nome']} - telefone inválido, marcado como falhou.")
+-117:             continue
+-118: 
+-119:         texto = _renderizar_mensagem(mensagem_template, lead)
+-120: 
+-121:         try:
+-122:             enviar_texto_waha(chat_id, texto)
+-123:             db.marcar_envio(lead["nome"], lead["cidade"], "enviado")
+-124:             print(f"[{i}/{total}] ENVIADO -> {lead['nome']} ({chat_id})")
+-125:         except Exception as e:
+-126:             db.marcar_envio(lead["nome"], lead["cidade"], "falhou")
+-127:             print(f"[{i}/{total}] FALHOU -> {lead['nome']} ({chat_id}): {e}")
+-128: 
+-129:         if i < total:
+-130:             time.sleep(intervalo)
+-131: 
+-132:     print("Campanha finalizada.")
++33: 
++34: ## Git force
++35: - Enviar
++36: git add -A; git commit -m "Atualização"; git push --force origin main
++37: 
++38: 
++39: ## git forçado
++40: - Envia
++41: git add -A; git commit -m "Melhorias no processo de coletas v3 $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
++42: - Recebe
++43: git fetch --all; git reset --hard origin/main
+ ````
+ 
+ ## File: src/localidades_db.py
+@@ -1649,6 +1328,164 @@ requirements.txt
+ 110: CAPTCHA_PAUSA_GLOBAL_SEGUNDOS=180
+ ````
+ 
++## File: memory/03-historico-de-mudancas.md
++````markdown
++  1: # 03 — Histórico de Mudanças
++  2: 
++  3: Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
++  4: 
++  5: ---
++  6: 
++  7: ## 2026-10-30
++  8: 
++  9: ### Templates de mensagem de WhatsApp (tabela + markdown)
++ 10: 
++ 11: - Nova tabela `templates_whatsapp` (`id`, `mensagem`, `descricao`, `ativo`),
++ 12:   criada e seedada no `LeadDatabase.__init__` (idempotente, `id=1` =
++ 13:   "Apresentação Agendamento Já").
++ 14: - `listar_templates_ativos()` retorna só os ativos para o menu de envio.
++ 15: - `_limpar_markdown_whatsapp` remove `**negrito**` e converte `[rótulo](url)` em
++ 16:   texto plano antes do envio (o template usa markdown; o WhatsApp não renderiza).
++ 17: 
++ 18: ### Menu de envio: template + filtros + teste
++ 19: 
++ 20: - `enviar_whatsapp_menu()` agora: escolhe template → aplica filtros → pergunta se
++ 21:   quer **teste de envio** → confirma e dispara.
++ 22: - Filtros de envio (menu "FILTROS DE ENVIO"): 0 todos / 1 por número / 2 por
++ 23:   cidade / 3 por nicho. Número aceita parte e compara só dígitos.
++ 24: - `testar_envio()`: digita um número com DDD ou escolhe um lead pendente.
++ 25: - `disparar_campanha` passou a aceitar `leads` (DataFrame já filtrado) — sem isso
++ 26:   os filtros eram ignorados no disparo (ele reconsultava o banco).
++ 27: 
++ 28: ### Correção crítica: chatId `@lid` vs `@c.us` (WAHA)
++ 29: 
++ 30: - **Sintoma:** `500 Server Error` no `/api/sendText` para o número do mantenedor.
++ 31: - **Causa:** número recente usa `@lid`; enviar `@c.us` retorna HTTP 500.
++ 32: - **Correção:** `_resolver_chatid_waha` consulta `/api/checkNumberStatus` e usa o
++ 33:   chatId retornado; fallback `@c.us` para números antigos.
++ 34: - **Cache:** coluna `leads.chat_id_waha` + `salvar_chat_id_waha` — a resolução é
++ 35:   feita uma única vez por lead (menos chamadas e reenvio mais rápido).
++ 36: - `data_envio_whatsapp` continua gravada só no sucesso; `status_whatsapp` em
++ 37:   `enviado`/`falhou`.
++ 38: 
++ 39: ---
++ 40: 
++ 41: ## 2026-10-29
++ 42: 
++ 43: ### Memória do projeto para IA
++ 44: 
++ 45: - Criada a pasta `memory/` com documentação densa para reduzir custo de contexto.
++ 46: - Arquivos: `README.md`, `00-resumo-projeto.md`, `01-arquitetura-e-modulos.md`,
++ 47:   `02-decisoes-e-armadilhas.md`, `03-historico-de-mudancas.md`,
++ 48:   `04-como-contribuir.md` (padrões de código, logs, config, testes e docs).
++ 49: - `README.md` limpo: removido o bloco "env temp:" (dump cru do `.env`) e
++ 50:   adicionadas as seções 12 (memória para IA) e 13 (observação sobre configuração).
++ 51: 
++ 52: ### Correção: cache de bairros ignorado (`bairros_fonte`)
++ 53: 
++ 54: - **Sintoma:** com `LOCALIDADES_USAR_CACHE=true` e base populada, a coleta ainda
++ 55:   consultava IBGE e Overpass.
++ 56: - **Causa:** `localidades_db.ler_municipios()` não retornava `bairros_fonte`;
++ 57:   `_resolver_municipio` repassava `None`, então o cache nunca era considerado.
++ 58: - **Correção:** query passou a trazer `uf` e `bairros_fonte`; o resolver repassa
++ 59:   o valor real.
++ 60: - **Teste:** com as funções de rede trocadas por `AssertionError`, os bairros de
++ 61:   Canoas (fonte `overpass`) e Bento Gonçalves (fonte `ibge`) vieram do banco.
++ 62: 
++ 63: ### Nome oficial do município (IBGE) na coleta
++ 64: 
++ 65: - `obter_municipio(cidade, uf)` confirma o município e devolve `id_municipio`,
++ 66:   `nome` oficial e `uf`.
++ 67: - `filtrar_cidades(cidades, termo)` compara **sem acento e sem caixa**:
++ 68:   `canoas`, `sao leopoldo`, `CHAPECO` funcionam.
++ 69: - `main.coletar_leads()` passa a usar o nome oficial no scraping, no banco e no
++ 70:   nome do Excel, e imprime `Município (IBGE): Canoas-RS | código 4304606`.
++ 71: - Lista de municípios **memoizada** por execução (`_municipios_da_uf`), evitando
++ 72:   rebaixar a lista da UF a cada cidade (principalmente com `SALVAR=false`).
++ 73: 
++ 74: ### Mensagens de bairros mais honestas
++ 75: 
++ 76: - Antes: `IBGE retornou 0 distrito(s) útil(eis)`.
++ 77: - Agora: `IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).`
++ 78: - Motivo: a API de Localidades do IBGE **não tem bairros** (só distritos).
++ 79: 
++ 80: ### Aquecimento de bairros por UF (menu 4)
++ 81: 
++ 82: - `locations.aquecer_bairros_uf(uf, cidades=None, max_cidades=0, pausa_segundos=None)`.
++ 83: - `localidades_db.ler_municipios_pendentes(uf)` → só `bairros_fonte IS NULL`.
++ 84: - Retoma de onde parou; `Ctrl+C` preserva o que já foi gravado.
++ 85: - Pausa (`AQUECER_PAUSA_SEGUNDOS`, default 2) só quando a cidade usou o OSM.
++ 86: - Falha de rede não grava nada (`falhas` no resumo) e a cidade continua pendente.
++ 87: - Bloqueado quando `LOCALIDADES_SALVAR=false`.
++ 88: - Medido: AC 21 → 18 → 17 pendentes; SP 621 → 616.
++ 89: 
++ 90: ### Flag `LOCALIDADES_SALVAR`
++ 91: 
++ 92: - `false` = somente leitura: nenhuma escrita, **nem criação de tabelas**
++ 93:   (`localidades_db.CRIAR_TABELAS = False`) e menus 3/4 desativados.
++ 94: - Todas as escritas passam por `_salvar()`, que respeita a flag.
++ 95: - Aviso único por execução para não poluir o log.
++ 96: 
++ 97: ### `.env` e `.env.example` comentados
++ 98: 
++ 99: - Cada variável com explicação, faixa de valores e efeito colateral.
++100: - Tabela das 4 combinações `USAR_CACHE × SALVAR`.
++101: - Regra explícita: comentário só em linha própria.
++102: - Valores locais preservados (`USAR_CACHE=false` → depois `true`).
++103: 
++104: ### Base de localidades offline (IBGE) — menu 3
++105: 
++106: - Novo `src/localidades_db.py` com tabelas `localidades_estados`,
++107:   `localidades_municipios`, `localidades_bairros` no mesmo `leads.duckdb`.
++108: - `src/config.py` centraliza o loader do `.env` (antes duplicado no `whatsapp.py`).
++109: - `src/locations.py` reescrito: cache → API → grava.
++110: - Sync nacional: 27 estados, 5.571 municípios, 10.751 distritos; 643 cidades com
++111:   bairros prontos pelo IBGE.
++112: - Fallback OSM por cidade, gravado uma única vez.
++113: 
++114: ### Anti-captcha / bloqueio do Google Maps
++115: 
++116: - Detecção por URL `/sorry/`, seletores de captcha e textos ("tráfego incomum").
++117: - Retry com pausa longa (`CAPTCHA_PAUSA_SEGUNDOS`) e **cooldown global**
++118:   (`CAPTCHA_PAUSA_GLOBAL_SEGUNDOS`) entre todas as threads.
++119: - Bloqueio persistente → aborta a área e **preserva os leads já extraídos**.
++120: - Testado com Playwright real: página normal passa, página de captcha levanta
++121:   `BloqueioDetectado` após `CAPTCHA_MAX_TENTATIVAS`.
++122: 
++123: ### Correção: menu não aparecia
++124: 
++125: - `src/main.py` definia `menu_interativo()` mas **nunca chamava**.
++126: - Adicionado `if __name__ == "__main__": menu_interativo()`.
++127: 
++128: ### Banco DuckDB versionado
++129: 
++130: - `data/leads.duckdb` passou a ser versionado no Git.
++131: - `.gitignore`: removidos `data/` e `*.duckdb` da lista de ignore; adicionados
++132:   `*.duckdb.wal` e `*.duckdb.tmp`.
++133: - `*.xlsx`, `*.csv`, `*.log` continuam ignorados (confirmado com
++134:   `git check-ignore` e `git ls-files`).
++135: - ⚠️ Comitar com o programa aberto sobe o `.duckdb` sem o `.wal` (dados
++136:   desatualizados). Fechar antes.
++137: 
++138: ---
++139: 
++140: ## Pendências / próximos passos
++141: 
++142: | Item | Status |
++143: |---|---|
++144: | Bairros oficiais via CNEFE 2022 | **Não implementar por hora** (decisão do mantenedor) |
++145: | Resolução automática de captcha (2Captcha/CapMonster) | Não implementado; hoje pausa e desiste da área |
++146: | Enriquecimento de e-mail a partir dos sites | Não iniciado |
++147: | Base de bairros offline nacional | Coberto parcialmente pelo IBGE (643 cidades) |
++148: 
++149: ## Problemas conhecidos (ambiente)
++150: 
++151: - **DBeaver aberto trava o DuckDB** → cache cai para as APIs.
++152: - **Overpass/Nominatim instáveis** (502, timeout) → aquecimento por UF precisa de
++153:   paciência e retomadas.
++154: - Interprete global do mantenedor é Python 3.15; **usar `venv\Scripts\python.exe`**.
++````
++
+ ## File: src/scraper.py
+ ````python
+   1: # src/scraper.py
+@@ -1993,6 +1830,317 @@ requirements.txt
+ 340:     return pd.DataFrame(todos_leads)
+ ````
+ 
++## File: src/database.py
++````python
++  1: # src/database.py
++  2: import duckdb
++  3: import pandas as pd
++  4: import os
++  5: import re
++  6: import json
++  7: from datetime import datetime
++  8: 
++  9: # Template padrão de WhatsApp, usado para popular a tabela de templates.
++ 10: # Segmento indica o nicho para o qual a mensagem foi criada (ex.: barbearias).
++ 11: TEMPLATE_AGRUPAMENTO_PADRAO = """Opa, tudo certo?
++ 12: 
++ 13: Conhece o Agendamento Já? É uma plataforma 100% online para deixar sua agenda no piloto automático e acabar com a dor de cabeça de gerenciar horários pelo WhatsApp.
++ 14: 
++ 15: Com planos a partir de R$ 60,00 no nosso aplicativo você consegue:
++ 16: 
++ 17: • Personalizar com a identidade da sua marca
++ 18: • Lembretes automatizados via Whatsapp
++ 19: • Divulgação de horários automatizadas
++ 20: • Controle de faturamento
++ 21: • Pagamentos antecipados
++ 22: 
++ 23: Conheça nossa proposta: https://agendamentoja.com/
++ 24: Acompanhe nosso dia a dia: https://www.instagram.com/agendamentoja_
++ 25: 
++ 26: Quer ver uma demonstração rápida de como funciona na prática para o seu tipo de serviço? É só me avisar!"""
++ 27: 
++ 28: # Segmento (nicho) padrão do template acima.
++ 29: TEMPLATE_SEGMENTO_PADRAO = "barbearias"
++ 30: 
++ 31: class LeadDatabase:
++ 32:     def __init__(self, db_path="data/leads.duckdb"):
++ 33:         os.makedirs(os.path.dirname(db_path), exist_ok=True)
++ 34:         self.db_path = db_path
++ 35:         self.conn = duckdb.connect(self.db_path)
++ 36:         self._create_sequences()
++ 37:         self._create_table()
++ 38:         self._ensure_whatsapp_columns()
++ 39:         self._ensure_lead_id()
++ 40:         self._create_templates_table()
++ 41:         self._seed_templates()
++ 42:         self._create_envios_log_table()
++ 43: 
++ 44:     def _create_sequences(self):
++ 45:         """Sequências de ids numéricos (leads e log de envios)."""
++ 46:         self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_leads_id")
++ 47:         self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_whatsapp_envios_log_id")
++ 48: 
++ 49:     def _create_table(self):
++ 50:         self.conn.execute("""
++ 51:             CREATE TABLE IF NOT EXISTS leads (
++ 52:                 lead_id INTEGER DEFAULT nextval('seq_leads_id'),
++ 53:                 nome VARCHAR,
++ 54:                 telefone VARCHAR,
++ 55:                 tipo_telefone VARCHAR,
++ 56:                 whatsapp_link VARCHAR,
++ 57:                 instagram VARCHAR,
++ 58:                 site VARCHAR,
++ 59:                 bairro VARCHAR,
++ 60:                 cidade VARCHAR,
++ 61:                 estado VARCHAR,
++ 62:                 nicho VARCHAR,
++ 63:                 status VARCHAR DEFAULT 'ativo',
++ 64:                 data_extracao TIMESTAMP,
++ 65:                 data_envio_whatsapp TIMESTAMP,
++ 66:                 status_whatsapp VARCHAR DEFAULT 'pendente',
++ 67:                 chat_id_waha VARCHAR,
++ 68:                 PRIMARY KEY (nome, cidade)
++ 69:             )
++ 70:         """)
++ 71: 
++ 72:     def _ensure_whatsapp_columns(self):
++ 73:         """Adiciona as colunas de log de WhatsApp em bancos criados antes da migração."""
++ 74:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
++ 75:         if 'data_envio_whatsapp' not in colunas:
++ 76:             self.conn.execute("ALTER TABLE leads ADD COLUMN data_envio_whatsapp TIMESTAMP")
++ 77:         if 'status_whatsapp' not in colunas:
++ 78:             self.conn.execute("ALTER TABLE leads ADD COLUMN status_whatsapp VARCHAR DEFAULT 'pendente'")
++ 79:         if 'chat_id_waha' not in colunas:
++ 80:             self.conn.execute("ALTER TABLE leads ADD COLUMN chat_id_waha VARCHAR")
++ 81: 
++ 82:     def _ensure_lead_id(self):
++ 83:         """Adiciona o id numérico em bancos antigos (backfill automático via DEFAULT)."""
++ 84:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
++ 85:         if 'lead_id' not in colunas:
++ 86:             self.conn.execute(
++ 87:                 "ALTER TABLE leads ADD COLUMN lead_id INTEGER DEFAULT nextval('seq_leads_id')"
++ 88:             )
++ 89: 
++ 90:     def _create_templates_table(self):
++ 91:         """Tabela de templates de mensagem de WhatsApp (mensagem, descrição, segmento e ativo)."""
++ 92:         self.conn.execute("""
++ 93:             CREATE TABLE IF NOT EXISTS templates_whatsapp (
++ 94:                 id INTEGER PRIMARY KEY,
++ 95:                 mensagem VARCHAR,
++ 96:                 descricao VARCHAR,
++ 97:                 segmento VARCHAR,
++ 98:                 ativo BOOLEAN DEFAULT TRUE
++ 99:             )
++100:         """)
++101:         colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(templates_whatsapp)").fetchall()}
++102:         if 'segmento' not in colunas:
++103:             self.conn.execute("ALTER TABLE templates_whatsapp ADD COLUMN segmento VARCHAR")
++104: 
++105:     def _seed_templates(self):
++106:         """Garante o template padrão do Agendamento Já (id=1), atualizando se já existir."""
++107:         self.conn.execute("""
++108:             INSERT INTO templates_whatsapp (id, mensagem, descricao, segmento, ativo)
++109:             VALUES (1, ?, 'Apresentação Agendamento Já', ?, TRUE)
++110:             ON CONFLICT (id) DO UPDATE SET
++111:                 mensagem = excluded.mensagem,
++112:                 descricao = excluded.descricao,
++113:                 segmento = excluded.segmento,
++114:                 ativo = excluded.ativo
++115:         """, [TEMPLATE_AGRUPAMENTO_PADRAO, TEMPLATE_SEGMENTO_PADRAO])
++116: 
++117:     def listar_templates_ativos(self):
++118:         """Retorna os templates ativos como lista de dicionários (id, mensagem, descricao, segmento, ativo)."""
++119:         return (
++120:             self.conn.execute("""
++121:                 SELECT id, mensagem, descricao, segmento, ativo
++122:                 FROM templates_whatsapp
++123:                 WHERE ativo = TRUE
++124:                 ORDER BY id
++125:             """)
++126:             .df()
++127:             .to_dict("records")
++128:         )
++129: 
++130:     def _create_envios_log_table(self):
++131:         """Tabela de log dos envios de WhatsApp (rastreamento de cada disparo).
++132: 
++133:         - `lead_id`: FK lógica para `leads.lead_id` (DuckDB não aplica FK).
++134:         - `telefone`: somente dígitos, igual a `leads.telefone` → chave de JOIN.
++135:         - `telefone_normalizado`: formato canônico 55DDDNUMERO (quando 11 dígitos).
++136:         - `payload`: retorno bruto da WAHA (JSON), útil para auditoria.
++137:         """
++138:         self.conn.execute("""
++139:             CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
++140:                 id INTEGER PRIMARY KEY DEFAULT nextval('seq_whatsapp_envios_log_id'),
++141:                 lead_id INTEGER,
++142:                 nome VARCHAR,
++143:                 cidade VARCHAR,
++144:                 telefone VARCHAR,
++145:                 telefone_normalizado VARCHAR,
++146:                 chat_id VARCHAR,
++147:                 status VARCHAR,
++148:                 mensagem VARCHAR,
++149:                 payload VARCHAR,
++150:                 erro VARCHAR,
++151:                 data_envio TIMESTAMP
++152:             )
++153:         """)
++154: 
++155:     def salvar_log_envio(self, lead_id, nome, cidade, telefone, chat_id, status,
++156:                          mensagem=None, payload=None, erro=None):
++157:         """Grava uma linha de log de envio com os campos normalizados.
++158: 
++159:         - `lead_id`: referencia `leads.lead_id` (vínculo por PK).
++160:         - `telefone` é reduzido a dígitos (mesma representação de `leads.telefone`),
++161:           permitindo JOIN direto: leads.telefone = whatsapp_envios_log.telefone.
++162:         """
++163:         telefone = re.sub(r"\D", "", str(telefone or ""))
++164:         telefone_normalizado = None
++165:         if telefone.startswith("55") and len(telefone) > 11:
++166:             base = telefone[2:]
++167:         else:
++168:             base = telefone
++169:         if len(base) == 11:
++170:             telefone_normalizado = f"55{base}"
++171:         elif telefone:
++172:             telefone_normalizado = telefone
++173: 
++174:         payload_str = None
++175:         if payload is not None:
++176:             if isinstance(payload, (dict, list)):
++177:                 try:
++178:                     payload_str = json.dumps(payload, ensure_ascii=False, default=str)
++179:                 except Exception:
++180:                     payload_str = str(payload)
++181:             else:
++182:                 payload_str = str(payload)
++183: 
++184:         self.conn.execute("""
++185:             INSERT INTO whatsapp_envios_log
++186:                 (lead_id, nome, cidade, telefone, telefone_normalizado, chat_id,
++187:                  status, mensagem, payload, erro, data_envio)
++188:             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++189:         """, [lead_id, nome, cidade, telefone or None, telefone_normalizado, chat_id,
++190:               status, mensagem, payload_str, erro, datetime.now()])
++191: 
++192:     def save_leads(self, df: pd.DataFrame):
++193:         if df.empty:
++194:             return 0
++195:         
++196:         descartados_db = self.conn.execute("SELECT nome, cidade FROM leads WHERE status = 'descartado'").fetchall()
++197:         descartados_set = set(descartados_db)
++198:         
++199:         df = df[~df.apply(lambda row: (row['nome'], row['cidade']) in descartados_set, axis=1)]
++200:         
++201:         if df.empty:
++202:             print("Todos os leads coletados já foram descartados anteriormente. Pulando salvamento.")
++203:             return 0
++204:             
++205:         df['data_extracao'] = datetime.now()
++206:         
++207:         if 'status' not in df.columns:
++208:             df['status'] = 'ativo'
++209: 
++210:         self.conn.register('df_temp', df)
++211: 
++212:         # UPSERT preservando o status atual e as colunas de log do WhatsApp.
++213:         # Assim, re-raspar um lead já enviado NÃO apaga data_envio_whatsapp/status_whatsapp.
++214:         self.conn.execute("""
++215:             INSERT INTO leads (nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao)
++216:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, cidade, estado, nicho, status, data_extracao
++217:             FROM df_temp
++218:             ON CONFLICT (nome, cidade) DO UPDATE SET
++219:                 telefone = excluded.telefone,
++220:                 tipo_telefone = excluded.tipo_telefone,
++221:                 whatsapp_link = excluded.whatsapp_link,
++222:                 instagram = excluded.instagram,
++223:                 site = excluded.site,
++224:                 bairro = excluded.bairro,
++225:                 estado = excluded.estado,
++226:                 nicho = excluded.nicho,
++227:                 data_extracao = excluded.data_extracao
++228:         """)
++229: 
++230:         self.conn.unregister('df_temp')
++231:         return len(df)
++232: 
++233:     def get_leads_para_envio(self, limite=None, numero=None, cidade=None, nicho=None):
++234:         """Retorna leads ativos, celulares e ainda não enviados (evita spam/fixo).
++235: 
++236:         Filtros opcionais:
++237:         - numero: filtra por telefone (completo ou parte; ignora não-dígitos)
++238:         - cidade: filtra por nome exato da cidade
++239:         - nicho:  filtra por nicho exato
++240:         """
++241:         query = """
++242:             SELECT lead_id, nome, telefone, whatsapp_link, bairro, cidade, estado, nicho, chat_id_waha
++243:             FROM leads
++244:             WHERE status = 'ativo'
++245:               AND tipo_telefone = 'Celular'
++246:               AND (status_whatsapp IS NULL OR status_whatsapp = 'pendente')
++247:         """
++248:         params = []
++249:         if numero:
++250:             numero = re.sub(r"\D", "", str(numero))
++251:             query += " AND regexp_replace(telefone, '[^0-9]', '', 'g') LIKE ?"
++252:             params.append(f"%{numero}%")
++253:         if cidade:
++254:             query += " AND cidade = ?"
++255:             params.append(cidade)
++256:         if nicho:
++257:             query += " AND nicho = ?"
++258:             params.append(nicho)
++259:         query += " ORDER BY cidade, bairro, nome"
++260:         if limite:
++261:             query += " LIMIT ?"
++262:             params.append(int(limite))
++263:         return self.conn.execute(query, params).df()
++264: 
++265:     def salvar_chat_id_waha(self, nome, cidade, chat_id):
++266:         """Cacheia o chatId resolvido (ex.: 143172869029943@lid) para não repetir
++267:         a chamada ao /api/checkNumberStatus em envios futuros."""
++268:         self.conn.execute("""
++269:             UPDATE leads
++270:             SET chat_id_waha = ?
++271:             WHERE nome = ? AND cidade = ?
++272:         """, [chat_id, nome, cidade])
++273: 
++274:     def marcar_envio(self, nome, cidade, status_whatsapp):
++275:         """Registra o resultado do envio. 'data_envio_whatsapp' é gravado apenas no sucesso."""
++276:         if status_whatsapp == 'enviado':
++277:             self.conn.execute("""
++278:                 UPDATE leads
++279:                 SET status_whatsapp = ?, data_envio_whatsapp = ?
++280:                 WHERE nome = ? AND cidade = ?
++281:             """, [status_whatsapp, datetime.now(), nome, cidade])
++282:         else:
++283:             self.conn.execute("""
++284:                 UPDATE leads
++285:                 SET status_whatsapp = ?
++286:                 WHERE nome = ? AND cidade = ?
++287:             """, [status_whatsapp, nome, cidade])
++288: 
++289:     def export_to_excel(self, nicho: str, cidade: str):
++290:         df = self.conn.execute("""
++291:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, data_extracao 
++292:             FROM leads 
++293:             WHERE nicho = ? AND cidade = ? AND status = 'ativo'
++294:             ORDER BY bairro, nome
++295:         """, [nicho, cidade]).df()
++296:         
++297:         if df.empty:
++298:             print("Nenhum dado ativo para exportar.")
++299:             return
++300:             
++301:         os.makedirs("output", exist_ok=True)
++302:         nome_arquivo = f"output/leads_{nicho}_{cidade}.xlsx".replace(" ", "_").lower()
++303:         df.to_excel(nome_arquivo, index=False)
++304:         print(f"🎉 Exportação concluída: {nome_arquivo} ({len(df)} leads ativos)")
++305: 
++306:     def close(self):
++307:         self.conn.close()
++````
++
+ ## File: src/locations.py
+ ````python
+   1: # src/locations.py
+@@ -2602,6 +2750,248 @@ requirements.txt
+ 605:     return True
+ ````
+ 
++## File: src/whatsapp.py
++````python
++  1: # src/whatsapp.py
++  2: """Integração com a WAHA (WhatsApp HTTP API) para envio de mensagens aos leads.
++  3: 
++  4: Configuração via variáveis de ambiente:
++  5:     WAHA_API_URL   -> URL base da WAHA (padrão: http://localhost:3000)
++  6:     WAHA_API_KEY   -> chave de API da WAHA (obrigatória se a instância exigir)
++  7:     WAHA_SESSION   -> nome da sessão conectada na WAHA (padrão: "default")
++  8: 
++  9: O módulo só envia para leads:
++ 10:     - status = 'ativo'
++ 11:     - tipo_telefone = 'Celular'  (nunca fixo)
++ 12:     - ainda não enviados (status_whatsapp = 'pendente' ou NULL)
++ 13: """
++ 14: import os
++ 15: import re
++ 16: import time
++ 17: 
++ 18: import requests
++ 19: 
++ 20: from src.config import carregar_env, str_para_bool
++ 21: 
++ 22: carregar_env()
++ 23: 
++ 24: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
++ 25: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
++ 26: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
++ 27: 
++ 28: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
++ 29: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
++ 30: 
++ 31: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
++ 32: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
++ 33: 
++ 34: # Intervalo (segundos) entre envios e limite de leads por campanha.
++ 35: # WAHA_LIMITE vazio = sem limite (envia todos os pendentes).
++ 36: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
++ 37: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
++ 38: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
++ 39: 
++ 40: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
++ 41: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
++ 42: 
++ 43: 
++ 44: def _normalizar_chatid(telefone):
++ 45:     """Converte o telefone salvo em um chatId clássico do WAHA (55DDDNUMERO@c.us)."""
++ 46:     numero = re.sub(r"\D", "", str(telefone or ""))
++ 47:     if not numero:
++ 48:         return None
++ 49: 
++ 50:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
++ 51:     if numero.startswith("55") and len(numero) > 11:
++ 52:         numero = numero[2:]
++ 53: 
++ 54:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
++ 55:     if len(numero) != 11:
++ 56:         return None
++ 57: 
++ 58:     return f"55{numero}@c.us"
++ 59: 
++ 60: 
++ 61: def _resolver_chatid_waha(telefone, session=None, api_url=None, api_key=None):
++ 62:     """Resolve o chatId correto via /api/checkNumberStatus.
++ 63: 
++ 64:     Números recentes no WhatsApp usam o formato @lid (hidden user ID) em vez do
++ 65:     clássico @c.us. Enviar com @c.us para esses números retorna HTTP 500.
++ 66:     A WAHA responde o chatId certo via checkNumberStatus; usamos ele e, se a
++ 67:     consulta falhar ou o número não existir, caímos no formato clássico @c.us.
++ 68:     """
++ 69:     session = session or WAHA_SESSION
++ 70:     api_url = api_url or WAHA_API_URL
++ 71:     api_key = api_key if api_key is not None else WAHA_API_KEY
++ 72: 
++ 73:     numero = re.sub(r"\D", "", str(telefone or ""))
++ 74:     if not numero:
++ 75:         return None
++ 76: 
++ 77:     if numero.startswith("55") and len(numero) > 11:
++ 78:         numero = numero[2:]
++ 79:     if len(numero) != 11:
++ 80:         return None
++ 81: 
++ 82:     telefone_internacional = f"55{numero}"
++ 83: 
++ 84:     headers = {"Accept": "application/json"}
++ 85:     if api_key:
++ 86:         headers["X-Api-Key"] = api_key
++ 87: 
++ 88:     url = f"{api_url.rstrip('/')}/api/checkNumberStatus"
++ 89:     params = {"session": session, "phone": telefone_internacional}
++ 90: 
++ 91:     try:
++ 92:         response = requests.get(url, params=params, headers=headers, timeout=20)
++ 93:         response.raise_for_status()
++ 94:         dados = response.json()
++ 95:         if dados.get("numberExists") and dados.get("chatId"):
++ 96:             return dados["chatId"]
++ 97:     except Exception:
++ 98:         pass
++ 99: 
++100:     # Fallback: formato clássico @c.us (funciona para números mais antigos).
++101:     return f"{telefone_internacional}@c.us"
++102: 
++103: 
++104: def _limpar_markdown_whatsapp(texto):
++105:     """Remove marcação de markdown (negrito e links) antes de enviar ao WhatsApp.
++106: 
++107:     - **texto**  -> texto
++108:     - [rótulo](url) -> url (quando o rótulo já é a própria URL) ou "rótulo (url)"
++109:     """
++110:     texto = re.sub(r"\*\*([^*]+)\*\*", r"\1", texto)
++111: 
++112:     def _sub_link(match):
++113:         rotulo = match.group(1)
++114:         url = match.group(2)
++115:         if rotulo.strip() == url.strip():
++116:             return url
++117:         return f"{rotulo} ({url})"
++118: 
++119:     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _sub_link, texto)
++120: 
++121: 
++122: def _renderizar_mensagem(template, lead):
++123:     """Substitui {nome}, {bairro} e {cidade} de forma segura e limpa o markdown."""
++124:     bairro = str(lead.get("bairro") or "sua região")
++125:     cidade = str(lead.get("cidade") or "")
++126:     texto = (
++127:         template
++128:         .replace("{nome}", str(lead.get("nome") or ""))
++129:         .replace("{bairro}", bairro)
++130:         .replace("{cidade}", cidade)
++131:     )
++132:     return _limpar_markdown_whatsapp(texto)
++133: 
++134: 
++135: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
++136:     """Envia uma mensagem de texto via WAHA."""
++137:     session = session or WAHA_SESSION
++138:     api_url = api_url or WAHA_API_URL
++139:     api_key = api_key if api_key is not None else WAHA_API_KEY
++140:     url = f"{api_url.rstrip('/')}/api/sendText"
++141: 
++142:     payload = {
++143:         "session": session,
++144:         "chatId": chat_id,
++145:         "text": texto,
++146:     }
++147: 
++148:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
++149:     if api_key:
++150:         headers["X-Api-Key"] = api_key
++151: 
++152:     response = requests.post(url, json=payload, headers=headers, timeout=30)
++153:     response.raise_for_status()
++154:     return response.json()
++155: 
++156: 
++157: def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None):
++158:     """Envia uma mensagem de texto para um número bruto (com DDD), já normalizado.
++159: 
++160:     Útil para o envio de teste, sem precisar de um lead no banco.
++161:     """
++162:     texto = _limpar_markdown_whatsapp(texto)
++163:     chat_id = _resolver_chatid_waha(numero, session=session, api_url=api_url, api_key=api_key)
++164:     if not chat_id:
++165:         raise ValueError(f"Número inválido para envio: {numero}")
++166:     return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
++167: 
++168: 
++169: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None):
++170:     """Envia mensagens para os leads celulares pendentes.
++171: 
++172:     - db: instância de LeadDatabase
++173:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
++174:     - intervalo: pausa em segundos entre envios (evita spam e banimento)
++175:     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
++176:     """
++177:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
++178:     if leads is None:
++179:         leads = db.get_leads_para_envio(limite)
++180: 
++181:     if leads.empty:
++182:         print("Nenhum lead celular pendente de envio.")
++183:         return
++184: 
++185:     total = len(leads)
++186:     print(f"Enviando para {total} lead(s) celular(es), com intervalo de {intervalo}s...")
++187: 
++188:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
++189:         texto = _renderizar_mensagem(mensagem_template, lead)
++190:         lead_id = lead.get("lead_id")
++191:         telefone = lead.get("telefone")
++192:         nome = lead.get("nome")
++193:         cidade = lead.get("cidade")
++194: 
++195:         chat_id = lead.get("chat_id_waha")
++196:         if not chat_id:
++197:             # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
++198:             # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
++199:             chat_id = _resolver_chatid_waha(telefone)
++200:             if chat_id:
++201:                 db.salvar_chat_id_waha(nome, cidade, chat_id)
++202: 
++203:         if not chat_id:
++204:             db.marcar_envio(nome, cidade, "falhou")
++205:             db.salvar_log_envio(
++206:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
++207:                 mensagem=texto, erro="telefone inválido",
++208:             )
++209:             print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
++210:             continue
++211: 
++212:         try:
++213:             resposta = enviar_texto_waha(chat_id, texto)
++214:             db.marcar_envio(nome, cidade, "enviado")
++215:             db.salvar_log_envio(
++216:                 lead_id, nome, cidade, telefone, chat_id, "enviado",
++217:                 mensagem=texto, payload=resposta,
++218:             )
++219:             print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
++220:         except Exception as e:
++221:             payload_erro = None
++222:             if getattr(e, "response", None) is not None:
++223:                 try:
++224:                     payload_erro = e.response.text
++225:                 except Exception:
++226:                     payload_erro = None
++227:             erro = f"{type(e).__name__}: {e}"
++228:             db.marcar_envio(nome, cidade, "falhou")
++229:             db.salvar_log_envio(
++230:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
++231:                 mensagem=texto, payload=payload_erro, erro=erro,
++232:             )
++233:             print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
++234: 
++235:         if i < total:
++236:             time.sleep(intervalo)
++237: 
++238:     print("Campanha finalizada.")
++````
++
+ ## File: .gitignore
+ ````
+  1: # Dados: o banco DuckDB É versionado (data/leads.duckdb).
+@@ -2637,219 +3027,6 @@ requirements.txt
+ 31: Thumbs.db
+ ````
+ 
+-## File: src/main.py
+-````python
+-  1: # src/main.py
+-  2: import sys
+-  3: import os
+-  4: 
+-  5: sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+-  6: 
+-  7: from src.locations import (
+-  8:     obter_estados,
+-  9:     obter_cidades,
+- 10:     obter_termos_busca,
+- 11:     obter_municipio,
+- 12:     filtrar_cidades,
+- 13:     sincronizar_base_localidades,
+- 14:     listar_municipios_pendentes,
+- 15:     aquecer_bairros_uf,
+- 16:     SALVAR as LOCALIDADES_SALVAR,
+- 17: )
+- 18: from src.scraper import rodar_scraper_multithread
+- 19: from src.database import LeadDatabase
+- 20: from src.whatsapp import (
+- 21:     disparar_campanha,
+- 22:     MENSAGEM_PADRAO,
+- 23:     WAHA_INTERVALO,
+- 24:     WAHA_LIMITE,
+- 25:     WAHA_ATIVO,
+- 26:     SOMENTE_ENVIO,
+- 27: )
+- 28: 
+- 29: 
+- 30: def coletar_leads():
+- 31:     df_estados = obter_estados()
+- 32:     if df_estados.empty:
+- 33:         return
+- 34: 
+- 35:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+- 36:     if uf_escolhida not in df_estados['uf'].values:
+- 37:         print("UF inválida.")
+- 38:         return
+- 39: 
+- 40:     cidades = obter_cidades(uf_escolhida)
+- 41:     termo_cidade = input("Digite o nome da cidade: ").strip()
+- 42:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
+- 43: 
+- 44:     if not cidades_filtradas:
+- 45:         print("Cidade não encontrada.")
+- 46:         return
+- 47:     elif len(cidades_filtradas) > 1:
+- 48:         cidade_escolhida = input(
+- 49:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
+- 50:         ).strip()
+- 51:         exatos = filtrar_cidades(cidades, cidade_escolhida)
+- 52:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
+- 53:     else:
+- 54:         cidade_escolhida = cidades_filtradas[0]
+- 55: 
+- 56:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
+- 57:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
+- 58:     if municipio:
+- 59:         cidade_escolhida = municipio["nome"]
+- 60:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
+- 61:     else:
+- 62:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
+- 63: 
+- 64:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
+- 65: 
+- 66:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
+- 67: 
+- 68:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
+- 69: 
+- 70:     print("\nIniciando extração...")
+- 71:     db = LeadDatabase()
+- 72: 
+- 73:     df_resultados = rodar_scraper_multithread(
+- 74:         nicho=nicho,
+- 75:         cidade=cidade_escolhida,
+- 76:         uf=uf_escolhida,
+- 77:         termos_lista=termos_busca,
+- 78:         mostrar_navegador=mostrar_navegador,
+- 79:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
+- 80:     )
+- 81: 
+- 82:     if not df_resultados.empty:
+- 83:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
+- 84:         db.export_to_excel(nicho, cidade_escolhida)
+- 85:     else:
+- 86:         print("Nenhum dado extraído.")
+- 87: 
+- 88:     db.close()
+- 89: 
+- 90: 
+- 91: def enviar_whatsapp_menu():
+- 92:     print("\n=== ENVIO WHATSAPP (WAHA) ===")
+- 93: 
+- 94:     if not WAHA_ATIVO:
+- 95:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
+- 96:         return
+- 97: 
+- 98:     db = LeadDatabase()
+- 99: 
+-100:     pendentes = db.get_leads_para_envio(limite=WAHA_LIMITE)
+-101:     if pendentes.empty:
+-102:         print("Nenhum lead celular pendente de envio.")
+-103:         db.close()
+-104:         return
+-105: 
+-106:     print(f"{len(pendentes)} lead(s) celular(es) pendentes (fixos são ignorados).")
+-107:     if WAHA_LIMITE:
+-108:         print(f"Limite configurado: {WAHA_LIMITE} lead(s) por campanha.")
+-109: 
+-110:     print(f"Mensagem padrão: {MENSAGEM_PADRAO}")
+-111:     mensagem = input("Digite a mensagem (ou Enter para usar a padrão): ").strip()
+-112:     if not mensagem:
+-113:         mensagem = MENSAGEM_PADRAO
+-114: 
+-115:     confirmar = input(f"Enviar para {len(pendentes)} lead(s)? (S/N): ").strip().upper()
+-116:     if confirmar != 'S':
+-117:         print("Envio cancelado.")
+-118:         db.close()
+-119:         return
+-120: 
+-121:     disparar_campanha(db, mensagem_template=mensagem, intervalo=WAHA_INTERVALO, limite=WAHA_LIMITE)
+-122:     db.close()
+-123: 
+-124: 
+-125: def aquecer_bairros_menu():
+-126:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
+-127:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
+-128: 
+-129:     if not LOCALIDADES_SALVAR:
+-130:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
+-131:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
+-132:         return
+-133: 
+-134:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
+-135:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
+-136: 
+-137:     df_estados = obter_estados()
+-138:     if df_estados.empty:
+-139:         print("Não foi possível obter a lista de estados.")
+-140:         return
+-141: 
+-142:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+-143:     if uf not in df_estados['uf'].values:
+-144:         print("UF inválida.")
+-145:         return
+-146: 
+-147:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
+-148:     pendentes = listar_municipios_pendentes(uf)
+-149:     if not pendentes:
+-150:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
+-151:         return
+-152: 
+-153:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
+-154:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
+-155:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
+-156: 
+-157:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
+-158:     max_cidades = 0
+-159:     if limite:
+-160:         try:
+-161:             max_cidades = max(1, int(limite))
+-162:         except ValueError:
+-163:             print("Valor inválido. Usando todas.")
+-164:             max_cidades = 0
+-165: 
+-166:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
+-167:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
+-168:     if confirmar != 'S':
+-169:         print("Operação cancelada.")
+-170:         return
+-171: 
+-172:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
+-173: 
+-174: 
+-175: def menu_interativo():
+-176:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
+-177:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
+-178:     so_enviar_cli = "--so-enviar" in sys.argv
+-179: 
+-180:     if SOMENTE_ENVIO or so_enviar_cli:
+-181:         enviar_whatsapp_menu()
+-182:         return
+-183: 
+-184:     while True:
+-185:         print("\n=== MAP SCRAPER ===")
+-186:         print("1 - Coletar leads")
+-187:         print("2 - Enviar mensagens WhatsApp")
+-188:         print("3 - Sincronizar base de localidades (IBGE)")
+-189:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
+-190:         print("5 - Sair")
+-191:         opcao = input("Escolha uma opção: ").strip()
+-192: 
+-193:         if opcao == "1":
+-194:             coletar_leads()
+-195:         elif opcao == "2":
+-196:             enviar_whatsapp_menu()
+-197:         elif opcao == "3":
+-198:             sincronizar_base_localidades()
+-199:         elif opcao == "4":
+-200:             aquecer_bairros_menu()
+-201:         elif opcao == "5":
+-202:             print("Até mais!")
+-203:             break
+-204:         else:
+-205:             print("Opção inválida.")
+-206: 
+-207: 
+-208: if __name__ == "__main__":
+-209:     menu_interativo()
+-````
+-
+ ## File: README.md
+ ````markdown
+   1: Documentação do Projeto: MAP SCRAPER
+@@ -3183,6 +3360,324 @@ requirements.txt
+ 329:     do valor.
+ ````
+ 
++## File: src/main.py
++````python
++  1: # src/main.py
++  2: import sys
++  3: import os
++  4: 
++  5: sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
++  6: 
++  7: from src.locations import (
++  8:     obter_estados,
++  9:     obter_cidades,
++ 10:     obter_termos_busca,
++ 11:     obter_municipio,
++ 12:     filtrar_cidades,
++ 13:     sincronizar_base_localidades,
++ 14:     listar_municipios_pendentes,
++ 15:     aquecer_bairros_uf,
++ 16:     SALVAR as LOCALIDADES_SALVAR,
++ 17: )
++ 18: from src.scraper import rodar_scraper_multithread
++ 19: from src.database import LeadDatabase
++ 20: from src.whatsapp import (
++ 21:     disparar_campanha,
++ 22:     enviar_texto_numero,
++ 23:     WAHA_INTERVALO,
++ 24:     WAHA_LIMITE,
++ 25:     WAHA_ATIVO,
++ 26:     SOMENTE_ENVIO,
++ 27: )
++ 28: 
++ 29: 
++ 30: def coletar_leads():
++ 31:     df_estados = obter_estados()
++ 32:     if df_estados.empty:
++ 33:         return
++ 34: 
++ 35:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
++ 36:     if uf_escolhida not in df_estados['uf'].values:
++ 37:         print("UF inválida.")
++ 38:         return
++ 39: 
++ 40:     cidades = obter_cidades(uf_escolhida)
++ 41:     termo_cidade = input("Digite o nome da cidade: ").strip()
++ 42:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
++ 43: 
++ 44:     if not cidades_filtradas:
++ 45:         print("Cidade não encontrada.")
++ 46:         return
++ 47:     elif len(cidades_filtradas) > 1:
++ 48:         cidade_escolhida = input(
++ 49:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
++ 50:         ).strip()
++ 51:         exatos = filtrar_cidades(cidades, cidade_escolhida)
++ 52:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
++ 53:     else:
++ 54:         cidade_escolhida = cidades_filtradas[0]
++ 55: 
++ 56:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
++ 57:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
++ 58:     if municipio:
++ 59:         cidade_escolhida = municipio["nome"]
++ 60:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
++ 61:     else:
++ 62:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
++ 63: 
++ 64:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
++ 65: 
++ 66:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
++ 67: 
++ 68:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
++ 69: 
++ 70:     print("\nIniciando extração...")
++ 71:     db = LeadDatabase()
++ 72: 
++ 73:     df_resultados = rodar_scraper_multithread(
++ 74:         nicho=nicho,
++ 75:         cidade=cidade_escolhida,
++ 76:         uf=uf_escolhida,
++ 77:         termos_lista=termos_busca,
++ 78:         mostrar_navegador=mostrar_navegador,
++ 79:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
++ 80:     )
++ 81: 
++ 82:     if not df_resultados.empty:
++ 83:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
++ 84:         db.export_to_excel(nicho, cidade_escolhida)
++ 85:     else:
++ 86:         print("Nenhum dado extraído.")
++ 87: 
++ 88:     db.close()
++ 89: 
++ 90: 
++ 91: def _confirmar(texto):
++ 92:     """Pergunta S/N e retorna True para respostas afirmativas."""
++ 93:     return input(texto).strip().upper() in ("S", "SIM", "Y", "YES")
++ 94: 
++ 95: 
++ 96: def _escolher_template(templates):
++ 97:     """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
++ 98:     print("\nTemplates ativos:")
++ 99:     for t in templates:
++100:         segmento = t.get("segmento")
++101:         sufixo = f"  [{segmento}]" if segmento else ""
++102:         print(f"  {t['id']} - {t['descricao']}{sufixo}")
++103: 
++104:     escolha = input("Escolha o template (Enter = primeiro): ").strip()
++105:     if not escolha:
++106:         return templates[0]["mensagem"]
++107: 
++108:     for t in templates:
++109:         if str(t["id"]) == escolha:
++110:             return t["mensagem"]
++111: 
++112:     print("Opção inválida. Usando o primeiro template.")
++113:     return templates[0]["mensagem"]
++114: 
++115: 
++116: def _escolher_filtros():
++117:     """Pergunta os filtros de envio; Enter = sem filtro (todos os leads)."""
++118:     print("\n=== FILTROS DE ENVIO ===")
++119:     print("0 - Todos (sem filtro)")
++120:     print("1 - Por número")
++121:     print("2 - Por cidade")
++122:     print("3 - Por nicho")
++123:     opcao = input("Escolha um filtro (Enter = 0): ").strip() or "0"
++124: 
++125:     numero = cidade = nicho = None
++126:     if opcao == "1":
++127:         numero = input("Número (completo ou parte): ").strip() or None
++128:     elif opcao == "2":
++129:         cidade = input("Cidade: ").strip() or None
++130:     elif opcao == "3":
++131:         nicho = input("Nicho: ").strip() or None
++132:     elif opcao != "0":
++133:         print("Opção inválida. Usando 'Todos'.")
++134:     return numero, cidade, nicho
++135: 
++136: 
++137: def testar_envio(db, mensagem, pendentes=None):
++138:     """Envia um teste para um número digitado ou para um lead pendente.
++139: 
++140:     `pendentes` (opcional): DataFrame já filtrado; se None, busca até 10 pendentes.
++141:     """
++142:     print("\n--- TESTE DE ENVIO ---")
++143:     print("1 - Digitar um número de teste")
++144:     print("2 - Escolher um lead pendente")
++145:     opcao = input("Escolha: ").strip()
++146: 
++147:     numero = None
++148:     if opcao == "1":
++149:         numero = input("Digite o número com DDD (ex: 51999998888): ").strip()
++150:     elif opcao == "2":
++151:         if pendentes is None:
++152:             pendentes = db.get_leads_para_envio(limite=10)
++153:         if pendentes.empty:
++154:             print("Nenhum lead pendente para testar.")
++155:             return
++156:         amostra = pendentes.head(10)
++157:         print("Leads pendentes:")
++158:         for i, (_, lead) in enumerate(amostra.iterrows(), 1):
++159:             print(f"  {i} - {lead['nome']} ({lead['telefone']})")
++160:         escolha = input("Escolha o número do lead: ").strip()
++161:         if not escolha.isdigit() or not (1 <= int(escolha) <= len(amostra)):
++162:             print("Escolha inválida.")
++163:             return
++164:         numero = amostra.iloc[int(escolha) - 1]["telefone"]
++165:     else:
++166:         print("Opção inválida.")
++167:         return
++168: 
++169:     if not numero:
++170:         print("Nenhum número informado.")
++171:         return
++172: 
++173:     try:
++174:         enviar_texto_numero(numero, mensagem)
++175:         print(f"✅ Teste enviado para {numero}")
++176:     except Exception as e:
++177:         print(f"❌ Falha no teste para {numero}: {e}")
++178: 
++179: 
++180: def enviar_whatsapp_menu():
++181:     print("\n=== ENVIO WHATSAPP (WAHA) ===")
++182: 
++183:     if not WAHA_ATIVO:
++184:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
++185:         return
++186: 
++187:     db = LeadDatabase()
++188: 
++189:     templates = db.listar_templates_ativos()
++190:     if not templates:
++191:         print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
++192:         db.close()
++193:         return
++194: 
++195:     mensagem = _escolher_template(templates)
++196: 
++197:     numero_f, cidade_f, nicho_f = _escolher_filtros()
++198: 
++199:     pendentes = db.get_leads_para_envio(
++200:         limite=WAHA_LIMITE, numero=numero_f, cidade=cidade_f, nicho=nicho_f
++201:     )
++202: 
++203:     if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
++204:         testar_envio(db, mensagem, pendentes=pendentes)
++205: 
++206:     if pendentes.empty:
++207:         print("Nenhum lead celular pendente de envio (com os filtros aplicados).")
++208:         db.close()
++209:         return
++210: 
++211:     print(f"\n{len(pendentes)} lead(s) celular(es) pendentes (fixos são ignorados).")
++212:     if WAHA_LIMITE:
++213:         print(f"Limite configurado: {WAHA_LIMITE} lead(s) por campanha.")
++214: 
++215:     if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
++216:         print("Envio cancelado.")
++217:         db.close()
++218:         return
++219: 
++220:     disparar_campanha(
++221:         db,
++222:         mensagem_template=mensagem,
++223:         intervalo=WAHA_INTERVALO,
++224:         limite=WAHA_LIMITE,
++225:         leads=pendentes,
++226:     )
++227:     db.close()
++228: 
++229: 
++230: def aquecer_bairros_menu():
++231:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
++232:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
++233: 
++234:     if not LOCALIDADES_SALVAR:
++235:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
++236:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
++237:         return
++238: 
++239:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
++240:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
++241: 
++242:     df_estados = obter_estados()
++243:     if df_estados.empty:
++244:         print("Não foi possível obter a lista de estados.")
++245:         return
++246: 
++247:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
++248:     if uf not in df_estados['uf'].values:
++249:         print("UF inválida.")
++250:         return
++251: 
++252:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
++253:     pendentes = listar_municipios_pendentes(uf)
++254:     if not pendentes:
++255:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
++256:         return
++257: 
++258:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
++259:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
++260:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
++261: 
++262:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
++263:     max_cidades = 0
++264:     if limite:
++265:         try:
++266:             max_cidades = max(1, int(limite))
++267:         except ValueError:
++268:             print("Valor inválido. Usando todas.")
++269:             max_cidades = 0
++270: 
++271:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
++272:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
++273:     if confirmar != 'S':
++274:         print("Operação cancelada.")
++275:         return
++276: 
++277:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
++278: 
++279: 
++280: def menu_interativo():
++281:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
++282:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
++283:     so_enviar_cli = "--so-enviar" in sys.argv
++284: 
++285:     if SOMENTE_ENVIO or so_enviar_cli:
++286:         enviar_whatsapp_menu()
++287:         return
++288: 
++289:     while True:
++290:         print("\n=== MAP SCRAPER ===")
++291:         print("1 - Coletar leads")
++292:         print("2 - Enviar mensagens WhatsApp")
++293:         print("3 - Sincronizar base de localidades (IBGE)")
++294:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
++295:         print("5 - Sair")
++296:         opcao = input("Escolha uma opção: ").strip()
++297: 
++298:         if opcao == "1":
++299:             coletar_leads()
++300:         elif opcao == "2":
++301:             enviar_whatsapp_menu()
++302:         elif opcao == "3":
++303:             sincronizar_base_localidades()
++304:         elif opcao == "4":
++305:             aquecer_bairros_menu()
++306:         elif opcao == "5":
++307:             print("Até mais!")
++308:             break
++309:         else:
++310:             print("Opção inválida.")
++311: 
++312: 
++313: if __name__ == "__main__":
++314:     menu_interativo()
++````
++
+ 
+ # Git Diffs
+ ## Git Diffs Working Tree
 
-````
+`````
 
 ## Git Diffs Staged
-````diff
+`````diff
 
-````
+`````
 
 
 
