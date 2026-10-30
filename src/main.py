@@ -19,7 +19,7 @@ from src.scraper import rodar_scraper_multithread
 from src.database import LeadDatabase
 from src.whatsapp import (
     disparar_campanha,
-    MENSAGEM_PADRAO,
+    enviar_texto_numero,
     WAHA_INTERVALO,
     WAHA_LIMITE,
     WAHA_ATIVO,
@@ -88,6 +88,93 @@ def coletar_leads():
     db.close()
 
 
+def _confirmar(texto):
+    """Pergunta S/N e retorna True para respostas afirmativas."""
+    return input(texto).strip().upper() in ("S", "SIM", "Y", "YES")
+
+
+def _escolher_template(templates):
+    """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
+    print("\nTemplates ativos:")
+    for t in templates:
+        print(f"  {t['id']} - {t['descricao']}")
+
+    escolha = input("Escolha o template (Enter = primeiro): ").strip()
+    if not escolha:
+        return templates[0]["mensagem"]
+
+    for t in templates:
+        if str(t["id"]) == escolha:
+            return t["mensagem"]
+
+    print("Opção inválida. Usando o primeiro template.")
+    return templates[0]["mensagem"]
+
+
+def _escolher_filtros():
+    """Pergunta os filtros de envio; Enter = sem filtro (todos os leads)."""
+    print("\n=== FILTROS DE ENVIO ===")
+    print("0 - Todos (sem filtro)")
+    print("1 - Por número")
+    print("2 - Por cidade")
+    print("3 - Por nicho")
+    opcao = input("Escolha um filtro (Enter = 0): ").strip() or "0"
+
+    numero = cidade = nicho = None
+    if opcao == "1":
+        numero = input("Número (completo ou parte): ").strip() or None
+    elif opcao == "2":
+        cidade = input("Cidade: ").strip() or None
+    elif opcao == "3":
+        nicho = input("Nicho: ").strip() or None
+    elif opcao != "0":
+        print("Opção inválida. Usando 'Todos'.")
+    return numero, cidade, nicho
+
+
+def testar_envio(db, mensagem, pendentes=None):
+    """Envia um teste para um número digitado ou para um lead pendente.
+
+    `pendentes` (opcional): DataFrame já filtrado; se None, busca até 10 pendentes.
+    """
+    print("\n--- TESTE DE ENVIO ---")
+    print("1 - Digitar um número de teste")
+    print("2 - Escolher um lead pendente")
+    opcao = input("Escolha: ").strip()
+
+    numero = None
+    if opcao == "1":
+        numero = input("Digite o número com DDD (ex: 51999998888): ").strip()
+    elif opcao == "2":
+        if pendentes is None:
+            pendentes = db.get_leads_para_envio(limite=10)
+        if pendentes.empty:
+            print("Nenhum lead pendente para testar.")
+            return
+        amostra = pendentes.head(10)
+        print("Leads pendentes:")
+        for i, (_, lead) in enumerate(amostra.iterrows(), 1):
+            print(f"  {i} - {lead['nome']} ({lead['telefone']})")
+        escolha = input("Escolha o número do lead: ").strip()
+        if not escolha.isdigit() or not (1 <= int(escolha) <= len(amostra)):
+            print("Escolha inválida.")
+            return
+        numero = amostra.iloc[int(escolha) - 1]["telefone"]
+    else:
+        print("Opção inválida.")
+        return
+
+    if not numero:
+        print("Nenhum número informado.")
+        return
+
+    try:
+        enviar_texto_numero(numero, mensagem)
+        print(f"✅ Teste enviado para {numero}")
+    except Exception as e:
+        print(f"❌ Falha no teste para {numero}: {e}")
+
+
 def enviar_whatsapp_menu():
     print("\n=== ENVIO WHATSAPP (WAHA) ===")
 
@@ -97,28 +184,44 @@ def enviar_whatsapp_menu():
 
     db = LeadDatabase()
 
-    pendentes = db.get_leads_para_envio(limite=WAHA_LIMITE)
-    if pendentes.empty:
-        print("Nenhum lead celular pendente de envio.")
+    templates = db.listar_templates_ativos()
+    if not templates:
+        print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
         db.close()
         return
 
-    print(f"{len(pendentes)} lead(s) celular(es) pendentes (fixos são ignorados).")
+    mensagem = _escolher_template(templates)
+
+    numero_f, cidade_f, nicho_f = _escolher_filtros()
+
+    pendentes = db.get_leads_para_envio(
+        limite=WAHA_LIMITE, numero=numero_f, cidade=cidade_f, nicho=nicho_f
+    )
+
+    if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
+        testar_envio(db, mensagem, pendentes=pendentes)
+
+    if pendentes.empty:
+        print("Nenhum lead celular pendente de envio (com os filtros aplicados).")
+        db.close()
+        return
+
+    print(f"\n{len(pendentes)} lead(s) celular(es) pendentes (fixos são ignorados).")
     if WAHA_LIMITE:
         print(f"Limite configurado: {WAHA_LIMITE} lead(s) por campanha.")
 
-    print(f"Mensagem padrão: {MENSAGEM_PADRAO}")
-    mensagem = input("Digite a mensagem (ou Enter para usar a padrão): ").strip()
-    if not mensagem:
-        mensagem = MENSAGEM_PADRAO
-
-    confirmar = input(f"Enviar para {len(pendentes)} lead(s)? (S/N): ").strip().upper()
-    if confirmar != 'S':
+    if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
         print("Envio cancelado.")
         db.close()
         return
 
-    disparar_campanha(db, mensagem_template=mensagem, intervalo=WAHA_INTERVALO, limite=WAHA_LIMITE)
+    disparar_campanha(
+        db,
+        mensagem_template=mensagem,
+        intervalo=WAHA_INTERVALO,
+        limite=WAHA_LIMITE,
+        leads=pendentes,
+    )
     db.close()
 
 

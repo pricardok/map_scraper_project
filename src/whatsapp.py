@@ -42,7 +42,7 @@ MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {ci
 
 
 def _normalizar_chatid(telefone):
-    """Converte o telefone salvo em um chatId do WAHA (55DDDNUMERO@c.us)."""
+    """Converte o telefone salvo em um chatId clássico do WAHA (55DDDNUMERO@c.us)."""
     numero = re.sub(r"\D", "", str(telefone or ""))
     if not numero:
         return None
@@ -58,16 +58,78 @@ def _normalizar_chatid(telefone):
     return f"55{numero}@c.us"
 
 
+def _resolver_chatid_waha(telefone, session=None, api_url=None, api_key=None):
+    """Resolve o chatId correto via /api/checkNumberStatus.
+
+    Números recentes no WhatsApp usam o formato @lid (hidden user ID) em vez do
+    clássico @c.us. Enviar com @c.us para esses números retorna HTTP 500.
+    A WAHA responde o chatId certo via checkNumberStatus; usamos ele e, se a
+    consulta falhar ou o número não existir, caímos no formato clássico @c.us.
+    """
+    session = session or WAHA_SESSION
+    api_url = api_url or WAHA_API_URL
+    api_key = api_key if api_key is not None else WAHA_API_KEY
+
+    numero = re.sub(r"\D", "", str(telefone or ""))
+    if not numero:
+        return None
+
+    if numero.startswith("55") and len(numero) > 11:
+        numero = numero[2:]
+    if len(numero) != 11:
+        return None
+
+    telefone_internacional = f"55{numero}"
+
+    headers = {"Accept": "application/json"}
+    if api_key:
+        headers["X-Api-Key"] = api_key
+
+    url = f"{api_url.rstrip('/')}/api/checkNumberStatus"
+    params = {"session": session, "phone": telefone_internacional}
+
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=20)
+        response.raise_for_status()
+        dados = response.json()
+        if dados.get("numberExists") and dados.get("chatId"):
+            return dados["chatId"]
+    except Exception:
+        pass
+
+    # Fallback: formato clássico @c.us (funciona para números mais antigos).
+    return f"{telefone_internacional}@c.us"
+
+
+def _limpar_markdown_whatsapp(texto):
+    """Remove marcação de markdown (negrito e links) antes de enviar ao WhatsApp.
+
+    - **texto**  -> texto
+    - [rótulo](url) -> url (quando o rótulo já é a própria URL) ou "rótulo (url)"
+    """
+    texto = re.sub(r"\*\*([^*]+)\*\*", r"\1", texto)
+
+    def _sub_link(match):
+        rotulo = match.group(1)
+        url = match.group(2)
+        if rotulo.strip() == url.strip():
+            return url
+        return f"{rotulo} ({url})"
+
+    return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _sub_link, texto)
+
+
 def _renderizar_mensagem(template, lead):
-    """Substitui {nome}, {bairro} e {cidade} de forma segura (sem quebrar com chaves soltas)."""
+    """Substitui {nome}, {bairro} e {cidade} de forma segura e limpa o markdown."""
     bairro = str(lead.get("bairro") or "sua região")
     cidade = str(lead.get("cidade") or "")
-    return (
+    texto = (
         template
         .replace("{nome}", str(lead.get("nome") or ""))
         .replace("{bairro}", bairro)
         .replace("{cidade}", cidade)
     )
+    return _limpar_markdown_whatsapp(texto)
 
 
 def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
@@ -92,15 +154,29 @@ def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
     return response.json()
 
 
-def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None):
-    """Envia mensagens para todos os leads celulares pendentes.
+def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None):
+    """Envia uma mensagem de texto para um número bruto (com DDD), já normalizado.
+
+    Útil para o envio de teste, sem precisar de um lead no banco.
+    """
+    texto = _limpar_markdown_whatsapp(texto)
+    chat_id = _resolver_chatid_waha(numero, session=session, api_url=api_url, api_key=api_key)
+    if not chat_id:
+        raise ValueError(f"Número inválido para envio: {numero}")
+    return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
+
+
+def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None):
+    """Envia mensagens para os leads celulares pendentes.
 
     - db: instância de LeadDatabase
     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
     - intervalo: pausa em segundos entre envios (evita spam e banimento)
+    - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
     """
     mensagem_template = mensagem_template or MENSAGEM_PADRAO
-    leads = db.get_leads_para_envio(limite)
+    if leads is None:
+        leads = db.get_leads_para_envio(limite)
 
     if leads.empty:
         print("Nenhum lead celular pendente de envio.")
@@ -110,7 +186,13 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None):
     print(f"Enviando para {total} lead(s) celular(es), com intervalo de {intervalo}s...")
 
     for i, (_, lead) in enumerate(leads.iterrows(), 1):
-        chat_id = _normalizar_chatid(lead.get("telefone"))
+        chat_id = lead.get("chat_id_waha")
+        if not chat_id:
+            # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
+            # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
+            chat_id = _resolver_chatid_waha(lead.get("telefone"))
+            if chat_id:
+                db.salvar_chat_id_waha(lead["nome"], lead["cidade"], chat_id)
         if not chat_id:
             db.marcar_envio(lead["nome"], lead["cidade"], "falhou")
             print(f"[{i}/{total}] {lead['nome']} - telefone inválido, marcado como falhou.")
