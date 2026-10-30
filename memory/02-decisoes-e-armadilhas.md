@@ -117,6 +117,24 @@ OpenStreetMap em toda sincronização.
 
 ---
 
+## WAHA: chatId `@c.us` vs `@lid` (HTTP 500)
+
+Enviar `POST /api/sendText` com `chatId = 55DDDNUMERO@c.us` **falha com HTTP 500**
+para números recentes do WhatsApp. Esses números foram migrados para o formato
+**`@lid`** (hidden user ID).
+
+- Diagnóstico: `GET /api/checkNumberStatus?session=default&phone=55DDD9XXXXXXXX`
+  responde `{"numberExists": true, "chatId": "143172869029943@lid"}`.
+- Correção: **sempre resolver o chatId via `checkNumberStatus` antes de enviar**,
+  em vez de montar `@c.us` na mão (é o que a documentação da WAHA recomenda para
+  números brasileiros).
+- O chatId resolvido é **cacheado** na coluna `leads.chat_id_waha` — a consulta
+  extra só acontece uma vez por lead.
+- ⚠️ O payload do `sendText` está correto (`{session, chatId, text}` + header
+  `X-Api-Key`); o erro 500 era **só** o formato do `chatId`, não o endpoint.
+
+---
+
 ## `.env` e Git
 
 - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.

@@ -165,16 +165,36 @@ Tabela `leads` — PK (`nome`, `cidade`):
 ```
 nome, telefone, tipo_telefone, whatsapp_link, instagram, site,
 bairro, cidade, estado, nicho, status (default 'ativo'),
-data_extracao, data_envio_whatsapp, status_whatsapp (default 'pendente')
+data_extracao, data_envio_whatsapp, status_whatsapp (default 'pendente'),
+chat_id_waha
 ```
+
+- `chat_id_waha`: cache do chatId resolvido pela WAHA (ex.: `143172869029943@lid`).
+  Preenchido na primeira resolução; evita chamar `/api/checkNumberStatus` de novo.
+
+Tabela `templates_whatsapp` (criada e seedada no `__init__`):
+
+```
+id INTEGER PK, mensagem, descricao, ativo BOOLEAN (default TRUE)
+```
+
+- Seed idempotente do template "Apresentação Agendamento Já" (`id=1`).
 
 ```python
 save_leads(df) -> int          # filtra descartados, UPSERT, não apaga log WAHA
-get_leads_para_envio(limite)   # ativo + Celular + pendente
+get_leads_para_envio(limite=None, numero=None, cidade=None, nicho=None)
+                               # ativo + Celular + pendente; filtros opcionais
 marcar_envio(nome, cidade, status_whatsapp)   # 'enviado' grava data
+salvar_chat_id_waha(nome, cidade, chat_id)    # cacheia o chatId resolvido
+listar_templates_ativos()      # [{id, mensagem, descricao, ativo}]
 export_to_excel(nicho, cidade) # output/leads_{nicho}_{cidade}.xlsx
 close()
 ```
+
+- `get_leads_para_envio`: `numero` compara por dígitos (regex `[^0-9]` removido),
+  aceita parte do número; `cidade`/`nicho` são match exato.
+- `save_leads` **preserva** `status`, `data_envio_whatsapp`, `status_whatsapp` e
+  `chat_id_waha` no re-UPSERT (não sobrescreve log de envio nem o chatId).
 
 ---
 
@@ -184,11 +204,22 @@ close()
 WAHA_API_URL, WAHA_API_KEY, WAHA_SESSION
 WAHA_ATIVO, SOMENTE_ENVIO, WAHA_INTERVALO, WAHA_LIMITE
 MENSAGEM_PADRAO
-enviar_texto_waha(chat_id, texto, ...)   # POST /api/sendText
-disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None)
+_normalizar_chatid(telefone)            # 55DDDNUMERO@c.us (clássico)
+_resolver_chatid_waha(telefone, ...)    # GET /api/checkNumberStatus → @lid ou @c.us
+_limpar_markdown_whatsapp(texto)        # **negrito** → texto; [r](u) → u
+_renderizar_mensagem(template, lead)    # placeholders + limpa markdown
+enviar_texto_waha(chat_id, texto, ...)  # POST /api/sendText
+enviar_texto_numero(numero, texto, ...) # resolve chatId e envia (p/ teste)
+disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None)
 ```
 
-- `chat_id` = `55DDD9XXXXXXXX@c.us` (só 11 dígitos; fixo é rejeitado).
+- **chatId:** números recentes usam `@lid`; enviar `@c.us` para eles retorna
+  **HTTP 500**. `_resolver_chatid_waha` consulta `/api/checkNumberStatus`
+  (`?session=&phone=55DDD9XXXXXXXX`) e usa o `chatId` retornado; fallback `@c.us`.
+- `disparar_campanha` aceita `leads` (DataFrame já filtrado). Se recebido, **não**
+  reconsulta o banco — respeita os filtros aplicados pelo menu.
+- O chatId resolvido é **cacheado** via `db.salvar_chat_id_waha` (só resolve na
+  primeira vez; reenvios pulam o checkNumberStatus).
 - Placeholders: `{nome}`, `{bairro}`, `{cidade}`.
 - `SOMENTE_ENVIO=true` (ou `--so-enviar`) pula o menu e vai direto ao envio.
 
@@ -206,3 +237,9 @@ disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None)
 
 `coletar_leads()`: UF → cidade (filtro sem acento) → **confirma no IBGE e usa o
 nome oficial** → nicho → termos → "Ver navegador?" → scraping → Excel.
+
+`enviar_whatsapp_menu()`: escolhe **template ativo** → aplica **filtros de envio**
+(0 todos / 1 por número / 2 por cidade / 3 por nicho) → pergunta se quer
+**teste de envio** (digitar número ou escolher um lead pendente) → lista os
+pendentes filtrados e confirma o disparo. Helpers: `_confirmar`,
+`_escolher_template`, `_escolher_filtros`, `testar_envio`.

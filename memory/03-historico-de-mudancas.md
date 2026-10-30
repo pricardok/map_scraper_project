@@ -4,6 +4,40 @@ Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
 
 ---
 
+## 2026-10-30
+
+### Templates de mensagem de WhatsApp (tabela + markdown)
+
+- Nova tabela `templates_whatsapp` (`id`, `mensagem`, `descricao`, `ativo`),
+  criada e seedada no `LeadDatabase.__init__` (idempotente, `id=1` =
+  "Apresentação Agendamento Já").
+- `listar_templates_ativos()` retorna só os ativos para o menu de envio.
+- `_limpar_markdown_whatsapp` remove `**negrito**` e converte `[rótulo](url)` em
+  texto plano antes do envio (o template usa markdown; o WhatsApp não renderiza).
+
+### Menu de envio: template + filtros + teste
+
+- `enviar_whatsapp_menu()` agora: escolhe template → aplica filtros → pergunta se
+  quer **teste de envio** → confirma e dispara.
+- Filtros de envio (menu "FILTROS DE ENVIO"): 0 todos / 1 por número / 2 por
+  cidade / 3 por nicho. Número aceita parte e compara só dígitos.
+- `testar_envio()`: digita um número com DDD ou escolhe um lead pendente.
+- `disparar_campanha` passou a aceitar `leads` (DataFrame já filtrado) — sem isso
+  os filtros eram ignorados no disparo (ele reconsultava o banco).
+
+### Correção crítica: chatId `@lid` vs `@c.us` (WAHA)
+
+- **Sintoma:** `500 Server Error` no `/api/sendText` para o número do mantenedor.
+- **Causa:** número recente usa `@lid`; enviar `@c.us` retorna HTTP 500.
+- **Correção:** `_resolver_chatid_waha` consulta `/api/checkNumberStatus` e usa o
+  chatId retornado; fallback `@c.us` para números antigos.
+- **Cache:** coluna `leads.chat_id_waha` + `salvar_chat_id_waha` — a resolução é
+  feita uma única vez por lead (menos chamadas e reenvio mais rápido).
+- `data_envio_whatsapp` continua gravada só no sucesso; `status_whatsapp` em
+  `enviado`/`falhou`.
+
+---
+
 ## 2026-10-29
 
 ### Memória do projeto para IA

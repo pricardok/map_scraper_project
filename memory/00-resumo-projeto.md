@@ -6,7 +6,9 @@
 - **Processo:** divide a busca por bairros, raspa o Google Maps com Playwright em
   multithread e extrai nome, telefone, Instagram e site.
 - **Saída:** leads no DuckDB (`data/leads.duckdb`) + Excel em `output/`.
-- **Extra:** dispara mensagens de WhatsApp via WAHA para leads já coletados.
+- **Extra:** dispara mensagens de WhatsApp via WAHA para leads já coletados, com
+  templates reutilizáveis, filtros (número/cidade/nicho), teste de envio e cache
+  do chatId resolvido (`@lid`/`@c.us`).
 
 ## Fluxo de alto nível
 
@@ -16,8 +18,8 @@ menu (src/main.py)
                   → scraper.rodar_scraper_multithread(...)
                   → database.LeadDatabase.save_leads (UPSERT incremental)
                   → database.export_to_excel
-  └─ 2 WhatsApp   → database.get_leads_para_envio
-                  → whatsapp.disparar_campanha (WAHA)
+  └─ 2 WhatsApp   → template ativo → filtros → teste → database.get_leads_para_envio
+                  → whatsapp.disparar_campanha (WAHA, chatId via checkNumberStatus)
   └─ 3 Sincronizar localidades (IBGE) → locations.sincronizar_base_localidades
   └─ 4 Aquecer bairros de uma UF       → locations.aquecer_bairros_uf
   └─ 5 Sair
@@ -44,7 +46,7 @@ map_scraper_project/
 ├── output/        Excel gerado (ignorado no Git)
 ├── src/
 │   ├── config.py          loader do .env + helpers (bool/int)
-│   ├── database.py        LeadDatabase: tabela leads, UPSERT, Excel, log WAHA
+│   ├── database.py        LeadDatabase: leads, templates_whatsapp, UPSERT, Excel, log WAHA
 │   ├── localidades_db.py  cache IBGE em DuckDB (tabelas localidades_*)
 │   ├── locations.py       IBGE + OSM + cache; sync e aquecimento por UF
 │   ├── scraper.py         Playwright, multithread, anti-captcha
