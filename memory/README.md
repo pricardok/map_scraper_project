@@ -30,3 +30,14 @@ Use esta pasta como **primeira fonte de contexto**.
 
 - `README.md` (raiz) — manual do usuário, instalação, uso.
 - `.env.example` — valores e comentários de cada variável.
+
+## Git force
+- Enviar
+git add -A; git commit -m "Atualização"; git push --force origin main
+
+
+## git forçado
+- Envia
+git add -A; git commit -m "Melhorias no processo de coletas v3 $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
+- Recebe
+git fetch --all; git reset --hard origin/main
