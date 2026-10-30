@@ -3,18 +3,30 @@ import duckdb
 import pandas as pd
 import os
 import re
+import json
 from datetime import datetime
 
 # Template padrão de WhatsApp, usado para popular a tabela de templates.
-# O markdown (negrito e links) é limpo antes do envio real no whatsapp.py.
+# Segmento indica o nicho para o qual a mensagem foi criada (ex.: barbearias).
 TEMPLATE_AGRUPAMENTO_PADRAO = """Opa, tudo certo?
 
-Conhece o **Agendamento Já**? É uma plataforma 100% online para deixar sua agenda no piloto automático e acabar com a dor de cabeça de gerenciar horários pelo WhatsApp.
+Conhece o Agendamento Já? É uma plataforma 100% online para deixar sua agenda no piloto automático e acabar com a dor de cabeça de gerenciar horários pelo WhatsApp.
 
-Conheça nossa proposta: [https://agendamentoja.com/](https://agendamentoja.com/)
-Acompanhe nosso dia a dia: [https://www.instagram.com/agendamentoja_/](https://www.instagram.com/agendamentoja_/)
+Com planos a partir de R$ 60,00 no nosso aplicativo você consegue:
+
+• Personalizar com a identidade da sua marca
+• Lembretes automatizados via Whatsapp
+• Divulgação de horários automatizadas
+• Controle de faturamento
+• Pagamentos antecipados
+
+Conheça nossa proposta: https://agendamentoja.com/
+Acompanhe nosso dia a dia: https://www.instagram.com/agendamentoja_
 
 Quer ver uma demonstração rápida de como funciona na prática para o seu tipo de serviço? É só me avisar!"""
+
+# Segmento (nicho) padrão do template acima.
+TEMPLATE_SEGMENTO_PADRAO = "barbearias"
 
 class LeadDatabase:
     def __init__(self, db_path="data/leads.duckdb"):
@@ -25,6 +37,7 @@ class LeadDatabase:
         self._ensure_whatsapp_columns()
         self._create_templates_table()
         self._seed_templates()
+        self._create_envios_log_table()
 
     def _create_table(self):
         self.conn.execute("""
@@ -59,29 +72,37 @@ class LeadDatabase:
             self.conn.execute("ALTER TABLE leads ADD COLUMN chat_id_waha VARCHAR")
 
     def _create_templates_table(self):
-        """Tabela de templates de mensagem de WhatsApp (mensagem, descrição e ativo)."""
+        """Tabela de templates de mensagem de WhatsApp (mensagem, descrição, segmento e ativo)."""
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS templates_whatsapp (
                 id INTEGER PRIMARY KEY,
                 mensagem VARCHAR,
                 descricao VARCHAR,
+                segmento VARCHAR,
                 ativo BOOLEAN DEFAULT TRUE
             )
         """)
+        colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(templates_whatsapp)").fetchall()}
+        if 'segmento' not in colunas:
+            self.conn.execute("ALTER TABLE templates_whatsapp ADD COLUMN segmento VARCHAR")
 
     def _seed_templates(self):
-        """Garante que o template padrão do Agendamento Já exista (idempotente)."""
+        """Garante o template padrão do Agendamento Já (id=1), atualizando se já existir."""
         self.conn.execute("""
-            INSERT INTO templates_whatsapp (id, mensagem, descricao, ativo)
-            SELECT 1, ?, 'Apresentação Agendamento Já', TRUE
-            WHERE NOT EXISTS (SELECT 1 FROM templates_whatsapp WHERE id = 1)
-        """, [TEMPLATE_AGRUPAMENTO_PADRAO])
+            INSERT INTO templates_whatsapp (id, mensagem, descricao, segmento, ativo)
+            VALUES (1, ?, 'Apresentação Agendamento Já', ?, TRUE)
+            ON CONFLICT (id) DO UPDATE SET
+                mensagem = excluded.mensagem,
+                descricao = excluded.descricao,
+                segmento = excluded.segmento,
+                ativo = excluded.ativo
+        """, [TEMPLATE_AGRUPAMENTO_PADRAO, TEMPLATE_SEGMENTO_PADRAO])
 
     def listar_templates_ativos(self):
-        """Retorna os templates ativos como lista de dicionários (id, mensagem, descricao, ativo)."""
+        """Retorna os templates ativos como lista de dicionários (id, mensagem, descricao, segmento, ativo)."""
         return (
             self.conn.execute("""
-                SELECT id, mensagem, descricao, ativo
+                SELECT id, mensagem, descricao, segmento, ativo
                 FROM templates_whatsapp
                 WHERE ativo = TRUE
                 ORDER BY id
@@ -89,6 +110,66 @@ class LeadDatabase:
             .df()
             .to_dict("records")
         )
+
+    def _create_envios_log_table(self):
+        """Tabela de log dos envios de WhatsApp (rastreamento de cada disparo).
+
+        - `telefone`: somente dígitos, igual a `leads.telefone` → chave de JOIN.
+        - `telefone_normalizado`: formato canônico 55DDDNUMERO (quando 11 dígitos).
+        - `payload`: retorno bruto da WAHA (JSON), útil para auditoria.
+        """
+        self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_whatsapp_envios_log_id")
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
+                id INTEGER PRIMARY KEY DEFAULT nextval('seq_whatsapp_envios_log_id'),
+                nome VARCHAR,
+                cidade VARCHAR,
+                telefone VARCHAR,
+                telefone_normalizado VARCHAR,
+                chat_id VARCHAR,
+                status VARCHAR,
+                mensagem VARCHAR,
+                payload VARCHAR,
+                erro VARCHAR,
+                data_envio TIMESTAMP
+            )
+        """)
+
+    def salvar_log_envio(self, nome, cidade, telefone, chat_id, status,
+                         mensagem=None, payload=None, erro=None):
+        """Grava uma linha de log de envio com os campos normalizados.
+
+        `telefone` é reduzido a dígitos (mesma representação de `leads.telefone`),
+        permitindo JOIN direto: leads.telefone = whatsapp_envios_log.telefone.
+        """
+        telefone = re.sub(r"\D", "", str(telefone or ""))
+        telefone_normalizado = None
+        if telefone.startswith("55") and len(telefone) > 11:
+            base = telefone[2:]
+        else:
+            base = telefone
+        if len(base) == 11:
+            telefone_normalizado = f"55{base}"
+        elif telefone:
+            telefone_normalizado = telefone
+
+        payload_str = None
+        if payload is not None:
+            if isinstance(payload, (dict, list)):
+                try:
+                    payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+                except Exception:
+                    payload_str = str(payload)
+            else:
+                payload_str = str(payload)
+
+        self.conn.execute("""
+            INSERT INTO whatsapp_envios_log
+                (nome, cidade, telefone, telefone_normalizado, chat_id,
+                 status, mensagem, payload, erro, data_envio)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [nome, cidade, telefone or None, telefone_normalizado, chat_id,
+              status, mensagem, payload_str, erro, datetime.now()])
 
     def save_leads(self, df: pd.DataFrame):
         if df.empty:

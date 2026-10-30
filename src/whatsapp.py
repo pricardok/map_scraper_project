@@ -186,27 +186,50 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
     print(f"Enviando para {total} lead(s) celular(es), com intervalo de {intervalo}s...")
 
     for i, (_, lead) in enumerate(leads.iterrows(), 1):
+        texto = _renderizar_mensagem(mensagem_template, lead)
+        telefone = lead.get("telefone")
+        nome = lead.get("nome")
+        cidade = lead.get("cidade")
+
         chat_id = lead.get("chat_id_waha")
         if not chat_id:
             # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
             # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
-            chat_id = _resolver_chatid_waha(lead.get("telefone"))
+            chat_id = _resolver_chatid_waha(telefone)
             if chat_id:
-                db.salvar_chat_id_waha(lead["nome"], lead["cidade"], chat_id)
+                db.salvar_chat_id_waha(nome, cidade, chat_id)
+
         if not chat_id:
-            db.marcar_envio(lead["nome"], lead["cidade"], "falhou")
-            print(f"[{i}/{total}] {lead['nome']} - telefone inválido, marcado como falhou.")
+            db.marcar_envio(nome, cidade, "falhou")
+            db.salvar_log_envio(
+                nome, cidade, telefone, chat_id, "falhou",
+                mensagem=texto, erro="telefone inválido",
+            )
+            print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
             continue
 
-        texto = _renderizar_mensagem(mensagem_template, lead)
-
         try:
-            enviar_texto_waha(chat_id, texto)
-            db.marcar_envio(lead["nome"], lead["cidade"], "enviado")
-            print(f"[{i}/{total}] ENVIADO -> {lead['nome']} ({chat_id})")
+            resposta = enviar_texto_waha(chat_id, texto)
+            db.marcar_envio(nome, cidade, "enviado")
+            db.salvar_log_envio(
+                nome, cidade, telefone, chat_id, "enviado",
+                mensagem=texto, payload=resposta,
+            )
+            print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
         except Exception as e:
-            db.marcar_envio(lead["nome"], lead["cidade"], "falhou")
-            print(f"[{i}/{total}] FALHOU -> {lead['nome']} ({chat_id}): {e}")
+            payload_erro = None
+            if getattr(e, "response", None) is not None:
+                try:
+                    payload_erro = e.response.text
+                except Exception:
+                    payload_erro = None
+            erro = f"{type(e).__name__}: {e}"
+            db.marcar_envio(nome, cidade, "falhou")
+            db.salvar_log_envio(
+                nome, cidade, telefone, chat_id, "falhou",
+                mensagem=texto, payload=payload_erro, erro=erro,
+            )
+            print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
 
         if i < total:
             time.sleep(intervalo)

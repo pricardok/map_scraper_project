@@ -97,7 +97,9 @@ def _escolher_template(templates):
     """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
     print("\nTemplates ativos:")
     for t in templates:
-        print(f"  {t['id']} - {t['descricao']}")
+        segmento = t.get("segmento")
+        sufixo = f"  [{segmento}]" if segmento else ""
+        print(f"  {t['id']} - {t['descricao']}{sufixo}")
 
     escolha = input("Escolha o template (Enter = primeiro): ").strip()
     if not escolha:
