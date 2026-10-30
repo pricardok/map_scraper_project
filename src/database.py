@@ -33,15 +33,23 @@ class LeadDatabase:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
         self.conn = duckdb.connect(self.db_path)
+        self._create_sequences()
         self._create_table()
         self._ensure_whatsapp_columns()
+        self._ensure_lead_id()
         self._create_templates_table()
         self._seed_templates()
         self._create_envios_log_table()
 
+    def _create_sequences(self):
+        """Sequências de ids numéricos (leads e log de envios)."""
+        self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_leads_id")
+        self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_whatsapp_envios_log_id")
+
     def _create_table(self):
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS leads (
+                lead_id INTEGER DEFAULT nextval('seq_leads_id'),
                 nome VARCHAR,
                 telefone VARCHAR,
                 tipo_telefone VARCHAR,
@@ -70,6 +78,14 @@ class LeadDatabase:
             self.conn.execute("ALTER TABLE leads ADD COLUMN status_whatsapp VARCHAR DEFAULT 'pendente'")
         if 'chat_id_waha' not in colunas:
             self.conn.execute("ALTER TABLE leads ADD COLUMN chat_id_waha VARCHAR")
+
+    def _ensure_lead_id(self):
+        """Adiciona o id numérico em bancos antigos (backfill automático via DEFAULT)."""
+        colunas = {row[1] for row in self.conn.execute("PRAGMA table_info(leads)").fetchall()}
+        if 'lead_id' not in colunas:
+            self.conn.execute(
+                "ALTER TABLE leads ADD COLUMN lead_id INTEGER DEFAULT nextval('seq_leads_id')"
+            )
 
     def _create_templates_table(self):
         """Tabela de templates de mensagem de WhatsApp (mensagem, descrição, segmento e ativo)."""
@@ -114,14 +130,15 @@ class LeadDatabase:
     def _create_envios_log_table(self):
         """Tabela de log dos envios de WhatsApp (rastreamento de cada disparo).
 
+        - `lead_id`: FK lógica para `leads.lead_id` (DuckDB não aplica FK).
         - `telefone`: somente dígitos, igual a `leads.telefone` → chave de JOIN.
         - `telefone_normalizado`: formato canônico 55DDDNUMERO (quando 11 dígitos).
         - `payload`: retorno bruto da WAHA (JSON), útil para auditoria.
         """
-        self.conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_whatsapp_envios_log_id")
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
                 id INTEGER PRIMARY KEY DEFAULT nextval('seq_whatsapp_envios_log_id'),
+                lead_id INTEGER,
                 nome VARCHAR,
                 cidade VARCHAR,
                 telefone VARCHAR,
@@ -135,12 +152,13 @@ class LeadDatabase:
             )
         """)
 
-    def salvar_log_envio(self, nome, cidade, telefone, chat_id, status,
+    def salvar_log_envio(self, lead_id, nome, cidade, telefone, chat_id, status,
                          mensagem=None, payload=None, erro=None):
         """Grava uma linha de log de envio com os campos normalizados.
 
-        `telefone` é reduzido a dígitos (mesma representação de `leads.telefone`),
-        permitindo JOIN direto: leads.telefone = whatsapp_envios_log.telefone.
+        - `lead_id`: referencia `leads.lead_id` (vínculo por PK).
+        - `telefone` é reduzido a dígitos (mesma representação de `leads.telefone`),
+          permitindo JOIN direto: leads.telefone = whatsapp_envios_log.telefone.
         """
         telefone = re.sub(r"\D", "", str(telefone or ""))
         telefone_normalizado = None
@@ -165,10 +183,10 @@ class LeadDatabase:
 
         self.conn.execute("""
             INSERT INTO whatsapp_envios_log
-                (nome, cidade, telefone, telefone_normalizado, chat_id,
+                (lead_id, nome, cidade, telefone, telefone_normalizado, chat_id,
                  status, mensagem, payload, erro, data_envio)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, [nome, cidade, telefone or None, telefone_normalizado, chat_id,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [lead_id, nome, cidade, telefone or None, telefone_normalizado, chat_id,
               status, mensagem, payload_str, erro, datetime.now()])
 
     def save_leads(self, df: pd.DataFrame):
@@ -221,7 +239,7 @@ class LeadDatabase:
         - nicho:  filtra por nicho exato
         """
         query = """
-            SELECT nome, telefone, whatsapp_link, bairro, cidade, estado, nicho, chat_id_waha
+            SELECT lead_id, nome, telefone, whatsapp_link, bairro, cidade, estado, nicho, chat_id_waha
             FROM leads
             WHERE status = 'ativo'
               AND tipo_telefone = 'Celular'

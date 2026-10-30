@@ -187,6 +187,7 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
 
     for i, (_, lead) in enumerate(leads.iterrows(), 1):
         texto = _renderizar_mensagem(mensagem_template, lead)
+        lead_id = lead.get("lead_id")
         telefone = lead.get("telefone")
         nome = lead.get("nome")
         cidade = lead.get("cidade")
@@ -202,7 +203,7 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
         if not chat_id:
             db.marcar_envio(nome, cidade, "falhou")
             db.salvar_log_envio(
-                nome, cidade, telefone, chat_id, "falhou",
+                lead_id, nome, cidade, telefone, chat_id, "falhou",
                 mensagem=texto, erro="telefone inválido",
             )
             print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
@@ -212,7 +213,7 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
             resposta = enviar_texto_waha(chat_id, texto)
             db.marcar_envio(nome, cidade, "enviado")
             db.salvar_log_envio(
-                nome, cidade, telefone, chat_id, "enviado",
+                lead_id, nome, cidade, telefone, chat_id, "enviado",
                 mensagem=texto, payload=resposta,
             )
             print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
@@ -226,7 +227,7 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
             erro = f"{type(e).__name__}: {e}"
             db.marcar_envio(nome, cidade, "falhou")
             db.salvar_log_envio(
-                nome, cidade, telefone, chat_id, "falhou",
+                lead_id, nome, cidade, telefone, chat_id, "falhou",
                 mensagem=texto, payload=payload_erro, erro=erro,
             )
             print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
