@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    container_name: map_scraper
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Configuração do runner (não-interativo). Valores padrão, sobrescreva
+      # no .env do host ou direto aqui.
+      NICHO: ${NICHO:-barbearias}
+      UFS: ${UFS:-}
+      MAX_CIDADES: ${MAX_CIDADES:-0}
+      MAX_BAIRROS: ${MAX_BAIRROS:-30}
+      AQUECER_BAIRROS: ${AQUECER_BAIRROS:-false}
+      SINCRONIZAR: ${SINCRONIZAR:-false}
+      MOSTRAR_NAVEGADOR: ${MOSTRAR_NAVEGADOR:-false}
+      EXPORTAR_EXCEL: ${EXPORTAR_EXCEL:-false}
+      LOOP: ${LOOP:-false}
+      LOOP_PAUSA_SEGUNDOS: ${LOOP_PAUSA_SEGUNDOS:-3600}
+    volumes:
+      # Banco local (modo DB_ENGINE=duckdb) e Excel gerado.
+      - ./data:/app/data
+      - ./output:/app/output

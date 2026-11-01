@@ -17,17 +17,49 @@ env_int(nome, padrao)           # inteiro com fallback
 PROJETO_RAIZ, CAMINHO_ENV
 ```
 
-> `src/whatsapp.py` chama `carregar_env()` no import (herança histórica).
-> `src/locations.py` e `src/scraper.py` dependem disso para ler suas flags.
+**Escolha do banco (engine independente):**
+
+```python
+DB_ENGINE        # 'postgres' ou 'duckdb' (inferido se vazio)
+DATABASE_URL     # postgresql://usuario:senha@host:porta/banco
+DUCKDB_PATH      # caminho do DuckDB local (default data/leads.duckdb)
+DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD  # forma separada (legado)
+```
+
+Inferência de `DB_ENGINE` quando não definido: `DUCKDB_PATH` definido → duckdb;
+senão `DATABASE_URL` definido → postgres; senão → duckdb (padrão offline).
+
+---
+
+## src/backend.py — abstração de banco
+
+Camada única que conhece `duckdb` e `psycopg2` (os demais módulos **não** os
+importam). Expõe:
+
+```python
+IS_DUCKDB            # bool
+ph()                 # placeholder: '?' (duckdb) ou '%s' (postgres)
+conectar()           # abre conexão com o backend configurado
+commit(conn) / close(conn)
+execute(conn, sql, params)
+query_df(conn, sql, params)      # -> DataFrame
+query_one(conn, sql, params)     # -> tupla | None
+query_all(conn, sql, params)     # -> lista de tuplas
+df_to_rows(df)                   # DataFrame -> tuplas (NaN -> None)
+bulk_upsert(conn, table, columns, rows, conflict, set_clause)
+```
+
+`bulk_upsert` monta `INSERT ... VALUES ... ON CONFLICT (...) DO UPDATE ...` com
+multi-linhas, usando `excluded.col` (funciona nos dois bancos).
 
 ---
 
 ## src/localidades_db.py — cache de localidades
 
-Acesso ao **mesmo** `data/leads.duckdb`. **Abre e fecha conexão a cada operação**,
-para não segurar o arquivo durante o scraping (DuckDB permite só 1 processo).
+Usa `src/backend.py` (funciona em PostgreSQL ou DuckDB). **Abre e fecha conexão
+a cada operação**, para não segurar o banco durante o scraping.
 
-Tabelas (criadas automaticamente quando `CRIAR_TABELAS = True`):
+Tabelas:
 
 | Tabela | Colunas |
 |---|---|
@@ -40,7 +72,6 @@ Tabelas (criadas automaticamente quando `CRIAR_TABELAS = True`):
 Funções:
 
 ```python
-conexao(db_path=None)              # contextmanager; DDL se CRIAR_TABELAS
 ler_estados() / salvar_estados(registros)
 ler_municipios(uf)                 # inclui bairros_fonte (necessário p/ cache hit)
 ler_municipios_pendentes(uf)       # bairros_fonte IS NULL
@@ -49,7 +80,7 @@ buscar_municipio(cidade, uf)       # dict ou None
 ler_bairros(id_municipio) / salvar_bairros(id_municipio, registros, fonte)
 salvar_distritos_bulk(distritos, min_bairros=3)   # aditivo
 estatisticas()                     # dict com contagens
-CacheIndisponivel                  # exceção (arquivo travado / tabela ausente)
+CacheIndisponivel                  # exceção (servidor fora / conexão falhou)
 ```
 
 **Semânticas importantes**
@@ -158,12 +189,12 @@ Flags: `CAPTCHA_MAX_TENTATIVAS` (2), `CAPTCHA_PAUSA_SEGUNDOS` (300),
 
 ## src/database.py — leads
 
-`LeadDatabase(db_path="data/leads.duckdb")`
+`LeadDatabase(conn=None)` — usa `src/backend.py` (PostgreSQL ou DuckDB).
 
-Tabela `leads` — PK (`nome`, `cidade`):
+Tabela `leads` — PK `lead_id`, UNIQUE (`nome`, `cidade`):
 
 ```
-nome, telefone, tipo_telefone, whatsapp_link, instagram, site,
+lead_id, nome, telefone, tipo_telefone, whatsapp_link, instagram, site,
 bairro, cidade, estado, nicho, status (default 'ativo'),
 data_extracao, data_envio_whatsapp, status_whatsapp (default 'pendente'),
 chat_id_waha
@@ -172,13 +203,21 @@ chat_id_waha
 - `chat_id_waha`: cache do chatId resolvido pela WAHA (ex.: `143172869029943@lid`).
   Preenchido na primeira resolução; evita chamar `/api/checkNumberStatus` de novo.
 
-Tabela `templates_whatsapp` (criada e seedada no `__init__`):
+Tabela `templates_whatsapp`:
 
 ```
-id INTEGER PK, mensagem, descricao, ativo BOOLEAN (default TRUE)
+id PK, mensagem, descricao, segmento, ativo BOOLEAN (default TRUE)
 ```
 
-- Seed idempotente do template "Apresentação Agendamento Já" (`id=1`).
+- Seed do template "Apresentação Agendamento Já" (segmento `barbearias`) é feito
+  em `schema.py`, **não** no `__init__` (que agora só conecta).
+
+Tabela `whatsapp_envios_log` (log de rastreamento por envio):
+
+```
+id PK, lead_id, nome, cidade, telefone, telefone_normalizado, chat_id,
+status, mensagem, payload, erro, data_envio
+```
 
 ```python
 save_leads(df) -> int          # filtra descartados, UPSERT, não apaga log WAHA
@@ -186,7 +225,8 @@ get_leads_para_envio(limite=None, numero=None, cidade=None, nicho=None)
                                # ativo + Celular + pendente; filtros opcionais
 marcar_envio(nome, cidade, status_whatsapp)   # 'enviado' grava data
 salvar_chat_id_waha(nome, cidade, chat_id)    # cacheia o chatId resolvido
-listar_templates_ativos()      # [{id, mensagem, descricao, ativo}]
+salvar_log_envio(lead_id, nome, cidade, telefone, chat_id, status, ...)
+listar_templates_ativos()      # [{id, mensagem, descricao, segmento, ativo}]
 export_to_excel(nicho, cidade) # output/leads_{nicho}_{cidade}.xlsx
 close()
 ```
@@ -202,8 +242,11 @@ close()
 
 ```python
 WAHA_API_URL, WAHA_API_KEY, WAHA_SESSION
-WAHA_ATIVO, SOMENTE_ENVIO, WAHA_INTERVALO, WAHA_LIMITE
+WAHA_ATIVO, SOMENTE_ENVIO
+WAHA_CADENCIA, WAHA_INTERVALO, WAHA_LIMITE
 MENSAGEM_PADRAO
+_parse_cadencia(valor)                 # "N:Y" -> (envios_por_janela, janela_s)
+_pausas_cadencia(total, envios, janela)# pausas aleatórias anti-bloqueio
 _normalizar_chatid(telefone)            # 55DDDNUMERO@c.us (clássico)
 _resolver_chatid_waha(telefone, ...)    # GET /api/checkNumberStatus → @lid ou @c.us
 _limpar_markdown_whatsapp(texto)        # **negrito** → texto; [r](u) → u
@@ -216,6 +259,9 @@ disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=N
 - **chatId:** números recentes usam `@lid`; enviar `@c.us` para eles retorna
   **HTTP 500**. `_resolver_chatid_waha` consulta `/api/checkNumberStatus`
   (`?session=&phone=55DDD9XXXXXXXX`) e usa o `chatId` retornado; fallback `@c.us`.
+- **Cadência (anti-bloqueio):** `WAHA_CADENCIA="X:Y"` (ex.: `3:60` = 3 envios por
+  minuto) distribui os envios **aleatoriamente** dentro de cada janela de Y
+  segundos, evitando pausas fixas. Tem prioridade sobre `WAHA_INTERVALO` (fixo).
 - `disparar_campanha` aceita `leads` (DataFrame já filtrado). Se recebido, **não**
   reconsulta o banco — respeita os filtros aplicados pelo menu.
 - O chatId resolvido é **cacheado** via `db.salvar_chat_id_waha` (só resolve na

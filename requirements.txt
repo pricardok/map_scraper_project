@@ -6,4 +6,5 @@ playwright
 chromium
 geopy
 duckdb
+psycopg2-binary
 requests

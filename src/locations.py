@@ -1,5 +1,5 @@
 # src/locations.py
-"""Localidades (UF, cidade e bairros) com cache local em DuckDB.
+"""Localidades (UF, cidade e bairros) com cache em PostgreSQL.
 
 Fonte oficial: API de Localidades do IBGE.
     estados    -> /api/v1/localidades/estados
@@ -39,12 +39,9 @@ OVERPASS_ENDPOINTS = [
 # Se true: consulta o banco antes da API. Se false: sempre busca na API.
 USAR_CACHE = str_para_bool(os.environ.get("LOCALIDADES_USAR_CACHE"), padrao=True)
 
-# Se false: NUNCA grava na base local (nem cria tabelas). Funciona como
-# "somente leitura": o banco é consultado, mas nada é alterado.
+# Se false: NUNCA grava na base local. Funciona como "somente leitura":
+# o banco é consultado, mas nada é alterado.
 SALVAR = str_para_bool(os.environ.get("LOCALIDADES_SALVAR"), padrao=True)
-
-# Reflete a flag no módulo de acesso ao banco (controla a criação das tabelas).
-localidades_db.CRIAR_TABELAS = SALVAR
 
 # Quantidade mínima de distritos úteis para não precisar do OpenStreetMap.
 # Abaixo disso, a cidade é complementada com bairros do OSM.

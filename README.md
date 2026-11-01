@@ -103,9 +103,36 @@ Documentação do Projeto: MAP SCRAPER
 
     Passo 4: Resultados
 
-        O banco de dados será atualizado em data/leads.duckdb.
+        O banco de dados será atualizado (PostgreSQL ou DuckDB, conforme o .env).
 
         Um arquivo Excel será gerado em output/leads_nicho_cidade.xlsx.
+
+    Execução em Docker (servidor, sem menu)
+
+    Para rodar sozinho num servidor (coleta automática contínua), o projeto tem
+    um Dockerfile e um docker-compose.yml. O container usa o runner
+    `src/coleta_auto.py` (não-interativo), configurado por variáveis de ambiente:
+
+    ```
+    NICHO=barbearias          # nicho a coletar
+    UFS=                      # vazio = todas as UFs do Brasil; ou RS,SP,RJ
+    MAX_CIDADES=0             # 0 = todas as cidades de cada UF
+    MAX_BAIRROS=30            # bairros por cidade
+    AQUECER_BAIRROS=false     # resolver bairros antes da coleta
+    SINCRONIZAR=false         # baixar IBGE antes (banco novo)
+    LOOP=false                # true = rodar em loop contínuo
+    LOOP_PAUSA_SEGUNDOS=3600  # pausa entre ciclos (LOOP=true)
+    ```
+
+    Subir e acompanhar:
+
+    ```
+    docker compose up -d --build
+    docker compose logs -f app
+    ```
+
+    O `.env` é injetado no container via `env_file` (banco e WAHA). Os volumes
+    `./data` e `./output` são montados para persistir DuckDB/Excel localmente.
 
 
 6. Gerenciamento do Banco de Dados (Regras de Negócio)

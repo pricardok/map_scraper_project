@@ -1,0 +1,29 @@
+# Arquivos que NÃO devem ir para o build context / imagem Docker.
+.git
+.gitignore
+.gitkeep
+
+# Segredos (o .env é injetado via env_file no compose, não copiado).
+.env
+
+# Ambiente virtual e cache Python.
+venv
+.venv
+__pycache__
+*.pyc
+*.pyo
+
+# Dados locais e saídas (são montados como volume, não copiados).
+data
+output
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+*.xlsx
+*.csv
+*.log
+
+# Documentação interna (não necessária na imagem).
+memory
+repomix*
+util

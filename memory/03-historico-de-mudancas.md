@@ -4,6 +4,38 @@ Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
 
 ---
 
+## 2026-10-31
+
+### Migração para PostgreSQL + suporte dual (PostgreSQL/DuckDB)
+
+- Banco externo PostgreSQL (`vps.agendamentoja.com/leads_db`) + mantido o DuckDB
+  local como alternativa offline.
+- Novo `src/backend.py`: abstrai conexão, placeholder (`?`/`%s`), leitura
+  (DataFrame/tupla) e bulk upsert entre os dois bancos. `database.py`,
+  `localidades_db.py` e `schema.py` não importam mais `duckdb`/`psycopg2`.
+- `config.py` lê `DB_ENGINE` (postgres|duckdb), `DATABASE_URL` e `DUCKDB_PATH`.
+  Inferência: DUCKDB_PATH → duckdb; senão DATABASE_URL → postgres; senão duckdb.
+- `schema.py` reescrito para os dois bancos; corrige o gap da tabela `leads`
+  (PK `lead_id` + UNIQUE `(nome,cidade)` + default `nextval('seq_leads_id')`).
+- `requirements.txt`: readicionado `duckdb` + `psycopg2-binary`.
+- `.env`: seção "BANCO DE DADOS — engine independente" com `DATABASE_URL` (senha
+  com `@` percent-encoded) e config antiga comentada como referência.
+
+### Cadência aleatória de envio WhatsApp (anti-bloqueio)
+
+- Nova `WAHA_CADENCIA="X:Y"` no `.env` (ex.: `3:60` = 3 envios por minuto).
+- `whatsapp.py`: `_parse_cadencia` + `_pausas_cadencia` distribuem os envios em
+  pontos **aleatórios** dentro de cada janela (pausas variáveis, não fixas).
+- Tem prioridade sobre `WAHA_INTERVALO` (fixo). `WAHA_CADENCIA` vazio → usa o fixo.
+
+### Tabela `whatsapp_envios_log` (rastreamento)
+
+- Log por envio com `lead_id`, `telefone` (dígitos) e `telefone_normalizado`
+  (55DDDNUMERO), `chat_id`, `status`, `mensagem`, `payload`, `erro`, `data_envio`.
+- JOIN pronto por `lead_id` ou `telefone`.
+
+---
+
 ## 2026-10-30
 
 ### Templates de mensagem de WhatsApp (tabela + markdown)

@@ -1,14 +1,14 @@
 # 00 — Resumo do Projeto
 
-**Map Scraper** — ferramenta local de prospecção de leads B2B a partir do Google Maps.
+**Map Scraper** — ferramenta de prospecção de leads B2B a partir do Google Maps.
 
 - **Entrada:** UF + cidade + nicho (ex.: `RS`, `Canoas`, `barbearias`).
 - **Processo:** divide a busca por bairros, raspa o Google Maps com Playwright em
   multithread e extrai nome, telefone, Instagram e site.
-- **Saída:** leads no DuckDB (`data/leads.duckdb`) + Excel em `output/`.
+- **Saída:** leads num banco (PostgreSQL **ou** DuckDB) + Excel em `output/`.
 - **Extra:** dispara mensagens de WhatsApp via WAHA para leads já coletados, com
-  templates reutilizáveis, filtros (número/cidade/nicho), teste de envio e cache
-  do chatId resolvido (`@lid`/`@c.us`).
+  templates reutilizáveis, filtros (número/cidade/nicho), teste de envio, cache
+  do chatId resolvido (`@lid`/`@c.us`) e **cadência aleatória** anti-bloqueio.
 
 ## Fluxo de alto nível
 
@@ -19,7 +19,7 @@ menu (src/main.py)
                   → database.LeadDatabase.save_leads (UPSERT incremental)
                   → database.export_to_excel
   └─ 2 WhatsApp   → template ativo → filtros → teste → database.get_leads_para_envio
-                  → whatsapp.disparar_campanha (WAHA, chatId via checkNumberStatus)
+                  → whatsapp.disparar_campanha (WAHA, cadência aleatória)
   └─ 3 Sincronizar localidades (IBGE) → locations.sincronizar_base_localidades
   └─ 4 Aquecer bairros de uma UF       → locations.aquecer_bairros_uf
   └─ 5 Sair
@@ -31,7 +31,7 @@ menu (src/main.py)
 |---|---|
 | Linguagem | Python 3.10+ (ambiente: `venv/`) |
 | Scraping | Playwright (Chromium) + ThreadPoolExecutor |
-| Banco | DuckDB (arquivo único, 1 processo por vez) |
+| Banco | **PostgreSQL (externo) ou DuckDB (local)** — via `src/backend.py` |
 | Dados | Pandas |
 | Localidades | API IBGE + Nominatim/Overpass (OpenStreetMap) |
 | WhatsApp | WAHA (WhatsApp HTTP API) |
@@ -41,17 +41,19 @@ menu (src/main.py)
 
 ```
 map_scraper_project/
-├── data/          leads.duckdb (+ .wal transiente, ignorado no Git)
+├── data/          leads.duckdb (usado quando DB_ENGINE=duckdb)
 ├── memory/        esta documentação para IA
 ├── output/        Excel gerado (ignorado no Git)
 ├── src/
-│   ├── config.py          loader do .env + helpers (bool/int)
-│   ├── database.py        LeadDatabase: leads, templates_whatsapp, UPSERT, Excel, log WAHA
-│   ├── localidades_db.py  cache IBGE em DuckDB (tabelas localidades_*)
+│   ├── config.py          loader do .env + escolha do backend (DB_ENGINE)
+│   ├── backend.py         abstração PostgreSQL/DuckDB (conexão, SQL, bulk upsert)
+│   ├── database.py        LeadDatabase: leads, templates, log WAHA (via backend)
+│   ├── localidades_db.py  cache IBGE (via backend)
 │   ├── locations.py       IBGE + OSM + cache; sync e aquecimento por UF
 │   ├── scraper.py         Playwright, multithread, anti-captcha
+│   ├── schema.py          DDL + seed + migração (setup: python src/schema.py)
 │   ├── utils.py           formatar_telefone → (telefone, tipo, link wa)
-│   ├── whatsapp.py        envio via WAHA
+│   ├── whatsapp.py        envio via WAHA + cadência aleatória
 │   └── main.py            menu interativo
 ├── .env / .env.example
 ├── requirements.txt
@@ -62,10 +64,12 @@ map_scraper_project/
 
 | Versionado | Ignorado |
 |---|---|
-| `data/leads.duckdb` | `.env` (segredos) |
-| `src/`, `memory/`, `README.md` | `*.duckdb.wal`, `*.duckdb.tmp` |
+| `src/`, `memory/`, `README.md` | `.env` (segredos) |
 | `.env.example` | `*.xlsx`, `*.csv`, `*.log` |
 | | `venv/`, `__pycache__/`, `sessions/` |
+
+> `data/leads.duckdb` é o banco local (modo `DB_ENGINE=duckdb`). O banco externo
+> PostgreSQL (modo `DB_ENGINE=postgres`) fica no servidor e não é versionado.
 
 Comando de sync usado pelo mantenedor (sobrescreve o remoto):
 

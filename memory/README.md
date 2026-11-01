@@ -38,7 +38,10 @@ git add -A; git commit -m "Atualização"; git push --force origin main
 
 
 ## git forçado
-- Envia
+
+# Envia
 git add -A; git commit -m "Melhorias no processo de coletas v3 $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
-- Recebe
+
+# Recebe
+
 git fetch --all; git reset --hard origin/main

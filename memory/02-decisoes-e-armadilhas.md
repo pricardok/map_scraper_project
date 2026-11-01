@@ -4,9 +4,23 @@ Leia antes de mexer no código. Cada item já custou tempo de depuração.
 
 ---
 
-## DuckDB: um processo por arquivo
+## Banco: PostgreSQL OU DuckDB (via `src/backend.py`)
 
-**O arquivo `data/leads.duckdb` só pode ser aberto por UM processo.** Não existe
+O projeto suporta dois backends, escolhidos por `DB_ENGINE` no `.env`:
+
+- `DB_ENGINE=postgres` → banco externo (`DATABASE_URL` ou `DB_*`).
+- `DB_ENGINE=duckdb` → arquivo local (`DUCKDB_PATH`, default `data/leads.duckdb`).
+
+**Regra de ouro:** nenhum módulo além de `src/backend.py` importa `duckdb` ou
+`psycopg2`. Todo acesso passa por `backend.execute/query_df/query_all/bulk_upsert`.
+- Placeholder de parâmetro: use `backend.ph()` (`?` no DuckDB, `%s` no Postgres),
+  NUNCA hardcode.
+- `excluded.col` funciona no `ON CONFLICT` dos dois bancos.
+- A DDL/seed fica em `schema.py` (roda uma vez: `python src/schema.py`).
+
+### Armadilha do DuckDB: um processo por arquivo
+
+**O `data/leads.duckdb` só pode ser aberto por UM processo.** Não existe
 "read-only compartilhado" — até `duckdb.connect(..., read_only=True)` falha:
 
 ```
@@ -16,16 +30,24 @@ O arquivo já está sendo usado por outro processo.
 
 Causas mais comuns: **DBeaver conectado**, scraper rodando, notebook aberto.
 
-Consequências no código:
-- `localidades_db.conexao()` abre/fecha a cada operação (não mantém aberto).
+Consequências:
+- `localidades_db` abre/fecha a conexão a cada operação (não mantém aberto).
 - `LeadDatabase` mantém aberto durante o scraping — **não** abra outra conexão
   persistente no mesmo processo.
-- `CacheIndisponivel` existe para degradar com aviso em vez de quebrar:
-  o sistema segue usando as APIs (IBGE/OSM) sem cache.
+- `CacheIndisponivel` degrada com aviso em vez de quebrar.
 
-- ⚠️ **Um WAL pendente (`.wal`) indica dados não consolidados.** Se comitar o
-  `.duckdb` com o programa aberto, o `.wal` (ignorado no Git) fica de fora e o
-  commit sobe um estado desatualizado. Feche o programa antes de comitar.
+### Armadilha do PostgreSQL: senha com `@` na URL
+
+Na `DATABASE_URL`, caracteres especiais da senha devem ser "percent-encoded"
+(`@` → `%40`, `:` → `%3A`, `/` → `%2F`). O `config.py` já decodifica com `unquote`.
+Ex.: `aojbfoeub@@@111` → `aojbfoeub%40%40%40111`.
+
+### Armadilha: identidade vs sequence (PostgreSQL)
+
+No Postgres, `templates_whatsapp.id`, `whatsapp_envios_log.id` e
+`localidades_bairros.id` são colunas **IDENTITY**. O `lead_id` de `leads` é
+`integer` com sequence manual (`seq_leads_id`). Não assuma que todas as PKs se
+comportam igual.
 
 ---
 
@@ -96,8 +118,7 @@ OpenStreetMap em toda sincronização.
 | true | false | lê do banco; o que falta vem da API sem gravar |
 | false | false | sempre API, banco intocado |
 
-- `SALVAR=false` também desativa a criação de tabelas (`CRIAR_TABELAS`) e os
-  menus **3** e **4**.
+- `SALVAR=false` também desativa a escrita local e os menus **3** e **4**.
 - As flags são lidas **no import**: mudar o `.env` exige reiniciar o programa.
 - Com `USAR_CACHE=false`, cada cidade baixa a lista da UF de novo (exceto pela
   memoização em memória `_municipios_da_uf`, válida só na execução atual).
@@ -135,6 +156,18 @@ para números recentes do WhatsApp. Esses números foram migrados para o formato
 
 ---
 
+## WAHA: cadência aleatória (anti-bloqueio)
+
+Enviar com pausa fixa (ex.: 15s, 15s, 15s) é fácil de detectar e leva a bloqueio.
+
+- `WAHA_CADENCIA="X:Y"` (ex.: `3:60` = 3 envios/minuto) faz os envios caírem em
+  **pontos aleatórios** dentro de cada janela de Y segundos → pausas variáveis.
+- Tem prioridade sobre `WAHA_INTERVALO` (pausa fixa, usada só se `WAHA_CADENCIA`
+  estiver vazio).
+- Implementação: `_pausas_cadencia(total, envios_janela, janela)` em `whatsapp.py`.
+
+---
+
 ## `.env` e Git
 
 - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.
@@ -167,7 +200,7 @@ entre `" - "` e `","`. Se não casar, `"Não Informado"`.
 ## Concorrência
 
 - `save_callback` é chamado **na thread principal** (dentro do loop de
-  `as_completed`), então não há escrita concorrente no DuckDB.
+  `as_completed`), então não há escrita concorrente no banco.
 - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
 - `lock` protege a lista `vistos`/`todos_leads`.
 

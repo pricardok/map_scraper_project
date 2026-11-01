@@ -12,6 +12,7 @@ O módulo só envia para leads:
     - ainda não enviados (status_whatsapp = 'pendente' ou NULL)
 """
 import os
+import random
 import re
 import time
 
@@ -31,11 +32,85 @@ WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
 # Se true, pula a coleta e vai direto para o envio (não coleta nada).
 SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
 
-# Intervalo (segundos) entre envios e limite de leads por campanha.
-# WAHA_LIMITE vazio = sem limite (envia todos os pendentes).
+# ---------------------------------------------------------------------------
+# Cadência de envio (anti-bloqueio)
+# ---------------------------------------------------------------------------
+# Formato "X a cada Y segundos", ex.: WAHA_CADENCIA=3:60  -> 3 envios por minuto.
+# Os envios são distribuídos ALEATORIAMENTE dentro da janela de Y segundos,
+# evitando pausas fixas (15s, 15s, ...) que são mais fáceis de detectar.
+WAHA_CADENCIA = os.environ.get("WAHA_CADENCIA", "").strip()
+
+# Legado: WAHA_INTERVALO (pausa fixa) continua funcionando quando WAHA_CADENCIA
+# não é informado.
 WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
+
+# Limite de leads por campanha. Vazio = sem limite.
 WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
 WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
+
+
+def _parse_cadencia(valor):
+    """Interpreta "N:Y" -> (envios_por_janela, janela_segundos).
+
+    Retorna None quando o valor está vazio/inválido (usa o intervalo fixo).
+    """
+    if not valor:
+        return None
+    try:
+        envios, janela = valor.split(":", 1)
+        envios = int(envios.strip())
+        janela = int(janela.strip())
+    except (ValueError, AttributeError):
+        return None
+    if envios <= 0 or janela <= 0:
+        return None
+    return envios, janela
+
+
+def _intervalos_aleatorios(quantidade, janela_segundos):
+    """Gera as pausas (em segundos) para `quantidade` envios numa janela.
+
+    Distribui os envios em pontos aleatórios crescentes dentro da janela e
+    retorna a diferença entre pontos consecutivos — o intervalo entre cada envio
+    varia, mas o total da janela é respeitado.
+    """
+    if quantidade <= 1:
+        return [0]
+    # Pontos aleatórios crescentes: 1 envio em cada "fatia" da janela, com
+    # jitter dentro da fatia, garantindo tempos diferentes entre os envios.
+    pontos = sorted(
+        random.uniform((i * janela_segundos) / quantidade,
+                       ((i + 1) * janela_segundos) / quantidade)
+        for i in range(quantidade)
+    )
+    return [round(pontos[i + 1] - pontos[i], 2) for i in range(quantidade - 1)]
+
+
+def _pausas_cadencia(total, envios_janela, janela_segundos):
+    """Gera as pausas da campanha inteira respeitando a cadência.
+
+    Agrupa os `total` envios em janelas de `janela_segundos` segundos, com
+    `envios_janela` envios por janela (distribuídos aleatoriamente). Retorna uma
+    lista com `total - 1` pausas (uma entre cada par consecutivo).
+    """
+    if total <= 1:
+        return [0]
+
+    # Timestamp de envio de cada lead: janela + posição aleatória dentro dela.
+    tempos = []
+    for idx in range(total):
+        janela_idx = idx // envios_janela
+        pos_na_janela = idx % envios_janela
+        inicio = janela_idx * janela_segundos
+        # posição aleatória dentro da fatia correspondente a este envio
+        p = random.uniform(
+            inicio + (pos_na_janela * janela_segundos) / envios_janela,
+            inicio + ((pos_na_janela + 1) * janela_segundos) / envios_janela,
+        )
+        tempos.append(p)
+
+    tempos.sort()
+    return [round(tempos[i + 1] - tempos[i], 2) for i in range(len(tempos) - 1)]
 
 # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
 MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
@@ -171,7 +246,7 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
 
     - db: instância de LeadDatabase
     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
-    - intervalo: pausa em segundos entre envios (evita spam e banimento)
+    - intervalo: pausa fixa em segundos entre envios (usado se não houver cadência)
     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
     """
     mensagem_template = mensagem_template or MENSAGEM_PADRAO
@@ -183,7 +258,17 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
         return
 
     total = len(leads)
-    print(f"Enviando para {total} lead(s) celular(es), com intervalo de {intervalo}s...")
+
+    # Cadência aleatória (ex.: 3 a cada 60s) tem prioridade sobre o intervalo fixo.
+    cadencia = _parse_cadencia(WAHA_CADENCIA)
+    if cadencia:
+        envios_janela, janela = cadencia
+        pausas = _pausas_cadencia(total, envios_janela, janela)
+        print(f"Enviando para {total} lead(s), cadência {envios_janela} a cada {janela}s "
+              f"(intervalos aleatórios)...")
+    else:
+        pausas = [intervalo] * max(0, total - 1)
+        print(f"Enviando para {total} lead(s), com intervalo fixo de {intervalo}s...")
 
     for i, (_, lead) in enumerate(leads.iterrows(), 1):
         texto = _renderizar_mensagem(mensagem_template, lead)
@@ -233,6 +318,6 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
             print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
 
         if i < total:
-            time.sleep(intervalo)
+            time.sleep(pausas[i - 1])
 
     print("Campanha finalizada.")

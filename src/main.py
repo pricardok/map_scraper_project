@@ -196,9 +196,8 @@ def enviar_whatsapp_menu():
 
     numero_f, cidade_f, nicho_f = _escolher_filtros()
 
-    pendentes = db.get_leads_para_envio(
-        limite=WAHA_LIMITE, numero=numero_f, cidade=cidade_f, nicho=nicho_f
-    )
+    # Busca todos os pendentes (sem limitar ainda) para mostrar o total disponível.
+    pendentes = db.get_leads_para_envio(numero=numero_f, cidade=cidade_f, nicho=nicho_f)
 
     if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
         testar_envio(db, mensagem, pendentes=pendentes)
@@ -208,9 +207,35 @@ def enviar_whatsapp_menu():
         db.close()
         return
 
-    print(f"\n{len(pendentes)} lead(s) celular(es) pendentes (fixos são ignorados).")
+    total_disponivel = len(pendentes)
+    print(f"\n{total_disponivel} lead(s) celular(es) pendentes (fixos são ignorados).")
+
+    # Quantidade (range): Enter = todos (respeitando o limite do .env, se houver).
     if WAHA_LIMITE:
-        print(f"Limite configurado: {WAHA_LIMITE} lead(s) por campanha.")
+        print(f"Limite configurado no .env: {WAHA_LIMITE} lead(s) por campanha.")
+        padrao = WAHA_LIMITE
+    else:
+        padrao = total_disponivel
+
+    entrada = input(
+        f"Quantos leads enviar? (Enter = {padrao}): "
+    ).strip()
+
+    if entrada:
+        if entrada.isdigit() and int(entrada) > 0:
+            quantidade = int(entrada)
+        else:
+            print("Valor inválido. Usando o padrão.")
+            quantidade = padrao
+    else:
+        quantidade = padrao
+
+    if WAHA_LIMITE and quantidade > WAHA_LIMITE:
+        print(f"Ajustando para o limite do .env ({WAHA_LIMITE}).")
+        quantidade = WAHA_LIMITE
+
+    quantidade = min(quantidade, total_disponivel)
+    pendentes = pendentes.head(quantidade)
 
     if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
         print("Envio cancelado.")
@@ -221,7 +246,7 @@ def enviar_whatsapp_menu():
         db,
         mensagem_template=mensagem,
         intervalo=WAHA_INTERVALO,
-        limite=WAHA_LIMITE,
+        limite=quantidade,
         leads=pendentes,
     )
     db.close()
