@@ -96,6 +96,11 @@ def _schema_duckdb(conn):
             data_envio TIMESTAMP
         )
     """)
+    # Contagem do teto diário de envios filtra por data_envio.
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_envios_log_data
+        ON whatsapp_envios_log (data_envio)
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS localidades_estados (
             uf VARCHAR PRIMARY KEY,
@@ -197,6 +202,11 @@ def _schema_postgres(conn):
             erro TEXT,
             data_envio TIMESTAMP
         )
+    """)
+    # Contagem do teto diário de envios filtra por data_envio.
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_whatsapp_envios_log_data
+        ON whatsapp_envios_log (data_envio)
     """)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS localidades_estados (

@@ -270,9 +270,18 @@ semear_progresso_de_leads(nicho)  # cidades que já têm leads -> concluida (DO 
 WAHA_API_URL, WAHA_API_KEY, WAHA_SESSION
 WAHA_ATIVO, SOMENTE_ENVIO
 WAHA_CADENCIA, WAHA_INTERVALO, WAHA_LIMITE
+WAHA_LIMITE_DIA, WAHA_JANELA_ENVIO
 MENSAGEM_PADRAO
 _parse_cadencia(valor)                 # "N:Y" -> (envios_por_janela, janela_s)
 _pausas_cadencia(total, envios, janela)# pausas aleatórias anti-bloqueio
+_parse_janela(valor)                   # "08:00-19:00" -> (ini_min, fim_min)
+descrever_janela()                     # "08:00-19:00" ou "24h (sem janela)"
+janela_aberta(agora=None)              # False fora do horário permitido
+inicio_da_janela_diaria(agora=None)    # abertura do ciclo atual (base do teto)
+proxima_abertura(agora=None)           # quando o envio volta a ser permitido
+aviso_fora_da_janela()                 # imprime o bloqueio + próxima abertura
+envios_hoje(db, desde=None)            # COUNT do log hoje (status='enviado')
+resumo_limite_dia(db)                  # (enviados_hoje, restante|None)
 _normalizar_chatid(telefone)            # 55DDDNUMERO@c.us (clássico)
 _resolver_chatid_waha(telefone, ...)    # GET /api/checkNumberStatus → @lid ou @c.us
 _limpar_markdown_whatsapp(texto)        # **negrito** → texto; [r](u) → u
@@ -288,8 +297,24 @@ disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=N
 - **Cadência (anti-bloqueio):** `WAHA_CADENCIA="X:Y"` (ex.: `3:60` = 3 envios por
   minuto) distribui os envios **aleatoriamente** dentro de cada janela de Y
   segundos, evitando pausas fixas. Tem prioridade sobre `WAHA_INTERVALO` (fixo).
+- **Três limites diferentes (não confundir):** `WAHA_CADENCIA` = ritmo (por
+  minuto); `WAHA_LIMITE` = teto por campanha; `WAHA_LIMITE_DIA` = teto por dia.
+- **Janela de envio:** `WAHA_JANELA_ENVIO="08:00-19:00"` (vazio = 24h). Fora
+  dela `janela_aberta()` é False e a campanha nem começa; se fechar no meio, o
+  loop para antes do próximo envio e os restantes ficam pendentes. Deixa de fora
+  apenas `enviar_texto_numero` (teste manual via código).
+- **Teto diário:** `envios_hoje` conta `whatsapp_envios_log.status='enviado'`
+  com `data_envio >= inicio_da_janela_diaria()`, e essa função retorna a
+  **abertura da janela** atual (ou meia-noite se não houver janela). Como o
+  corte é calculado em Python e comparado com o timestamp gravado pelo próprio
+  processo, não há divergência de timezone do servidor. Conta no banco, então
+  reiniciar o programa não zera o dia.
+- `disparar_campanha` reconsulta o contador **a cada envio** (query barata, com
+  índice em `data_envio`), cobrindo campanha que cruza a virada do dia e outra
+  campanha rodando em paralelo no mesmo banco.
 - `disparar_campanha` aceita `leads` (DataFrame já filtrado). Se recebido, **não**
-  reconsulta o banco — respeita os filtros aplicados pelo menu.
+  reconsulta o banco — respeita os filtros aplicados pelo menu. O parâmetro
+  `limite` só é usado quando `leads` é None.
 - O chatId resolvido é **cacheado** via `db.salvar_chat_id_waha` (só resolve na
   primeira vez; reenvios pulam o checkNumberStatus).
 - Placeholders: `{nome}`, `{bairro}`, `{cidade}`.

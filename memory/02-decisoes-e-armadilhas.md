@@ -168,6 +168,36 @@ Enviar com pausa fixa (ex.: 15s, 15s, 15s) é fácil de detectar e leva a bloque
 
 ---
 
+## WAHA: limites e janela (coisas diferentes)
+
+Confusão comum: achar que `WAHA_LIMITE` é o teto diário. Não é.
+
+| Variável | O que faz | Reiniciar zera? |
+|---|---|---|
+| `WAHA_CADENCIA` (`3:60`) | **ritmo**: 3 por minuto | — |
+| `WAHA_JANELA_ENVIO` (`08:00-19:00`) | **horário**: só envia dentro | — |
+| `WAHA_LIMITE` (`150`) | **campanha**: máximo por execução | sim |
+| `WAHA_LIMITE_DIA` (`150`) | **dia**: soma todas as campanhas | **não** (lê o log) |
+
+- O contador do dia vem de `whatsapp_envios_log` (`status='enviado'`) e não da
+  memória do processo — por isso reiniciar o programa/container não "libera"
+  mais envios.
+- O corte do dia é `inicio_da_janela_diaria()`, que devolve a **abertura da
+  janela** (08:00 no exemplo). Sem janela, é meia-noite. Comparado com o
+  `data_envio` gravado pelo próprio processo: não depende do timezone do banco.
+- Envios com `status='falhou'` **não** contam para o teto.
+- `disparar_campanha` reconsulta janela e contador **a cada envio**: campanha
+  longa que cruza o fim do horário ou a virada do dia para no ponto certo, e
+  duas campanhas em paralelo continuam respeitando o teto.
+- Janela que atravessa a meia-noite (`22:00-06:00`) é válida: `janela_aberta`
+  compara minutos e trata `início > fim` como travessia.
+- Janela inválida (ex.: `25:00-19:00`) imprime aviso e vira "sem janela" (24h).
+  A escolha é deliberada: não travar a operação por erro de digitação.
+- `inicio == fim` (ex.: `08:00-08:00`) também é tratado como 24h, não como
+  janela de duração zero.
+
+---
+
 ## `.env` e Git
 
 - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.

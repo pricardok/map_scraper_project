@@ -15,10 +15,12 @@ import os
 import random
 import re
 import time
+from datetime import datetime, timedelta
 
 import requests
 
-from src.config import carregar_env, str_para_bool
+from src import backend
+from src.config import carregar_env, env_int, str_para_bool
 
 carregar_env()
 
@@ -44,9 +46,146 @@ WAHA_CADENCIA = os.environ.get("WAHA_CADENCIA", "").strip()
 # não é informado.
 WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
 
-# Limite de leads por campanha. Vazio = sem limite.
+# Limite de leads por campanha (uma execução do envio). Vazio = sem limite.
+# ATENÇÃO: é por campanha, NÃO por dia. Para teto diário use WAHA_LIMITE_DIA.
 WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
 WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
+
+# ---------------------------------------------------------------------------
+# Janela de envio (horário permitido) e limite diário
+# ---------------------------------------------------------------------------
+# Teto de mensagens enviadas por dia, somando TODAS as campanhas. O contador é
+# lido do log (`whatsapp_envios_log`, status='enviado'), então reiniciar o
+# processo não "zera" o limite. Vazio/0 = sem teto diário.
+WAHA_LIMITE_DIA = env_int("WAHA_LIMITE_DIA", 0) or None
+
+# Horário permitido para envio: "08:00-19:00" (ou "8-19").
+# Vazio = envia a qualquer hora. Aceita janela que atravessa a meia-noite
+# (ex.: "22:00-06:00"). O dia do teto diário começa junto com a janela.
+WAHA_JANELA_ENVIO = os.environ.get("WAHA_JANELA_ENVIO", "").strip()
+
+_PADRAO_JANELA = re.compile(
+    r"^\s*(\d{1,2})(?::(\d{2}))?\s*(?:-|–|a|as|às)\s*(\d{1,2})(?::(\d{2}))?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _parse_janela(valor):
+    """Interpreta "08:00-19:00" -> (minuto_inicio, minuto_fim).
+
+    Retorna None para vazio/inválido ou quando começa e termina no mesmo
+    horário (24h). A janela pode atravessar a meia-noite (início > fim).
+    """
+    if not valor:
+        return None
+    casamento = _PADRAO_JANELA.match(valor)
+    if not casamento:
+        print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
+              f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
+        return None
+
+    h1, m1, h2, m2 = casamento.groups()
+    horas = (int(h1), int(m1 or 0), int(h2), int(m2 or 0))
+    if horas[0] > 23 or horas[1] > 59 or horas[2] > 23 or horas[3] > 59:
+        print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
+              f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
+        return None
+
+    inicio = horas[0] * 60 + horas[1]
+    fim = horas[2] * 60 + horas[3]
+    if inicio == fim:
+        return None
+    return inicio, fim
+
+
+_JANELA = _parse_janela(WAHA_JANELA_ENVIO)
+
+
+def descrever_janela():
+    """Texto da janela configurada (ex.: '08:00-19:00')."""
+    if not _JANELA:
+        return "24h (sem janela)"
+    inicio, fim = _JANELA
+    return f"{inicio // 60:02d}:{inicio % 60:02d}-{fim // 60:02d}:{fim % 60:02d}"
+
+
+def janela_aberta(agora=None):
+    """True quando o horário atual está dentro da janela de envio."""
+    if not _JANELA:
+        return True
+    agora = agora or datetime.now()
+    atual = agora.hour * 60 + agora.minute
+    inicio, fim = _JANELA
+    if inicio < fim:
+        return inicio <= atual < fim
+    return atual >= inicio or atual < fim  # atravessa a meia-noite
+
+
+def inicio_da_janela_diaria(agora=None):
+    """Início do ciclo atual da janela (base da contagem do teto diário).
+
+    Sem janela configurada, o dia começa à meia-noite. Com janela, começa na
+    abertura dela — então o teto diário "renova" quando o horário permitido abre.
+    """
+    agora = agora or datetime.now()
+    inicio_min = _JANELA[0] if _JANELA else 0
+    inicio = agora.replace(
+        hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
+    )
+    if agora < inicio:
+        inicio -= timedelta(days=1)
+    return inicio
+
+
+def proxima_abertura(agora=None):
+    """Próximo momento em que o envio volta a ser permitido (agora, se aberto)."""
+    agora = agora or datetime.now()
+    if janela_aberta(agora):
+        return agora
+    inicio_min = _JANELA[0]
+    abertura = agora.replace(
+        hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
+    )
+    if agora >= abertura:
+        abertura += timedelta(days=1)
+    return abertura
+
+
+def aviso_fora_da_janela():
+    """Informa que o envio está bloqueado e quando ele volta a ser permitido."""
+    abertura = proxima_abertura()
+    print(f"Fora da janela de envio ({descrever_janela()}). "
+          f"Próximo envio a partir de {abertura:%d/%m às %H:%M}.")
+
+
+def envios_hoje(db, desde=None):
+    """Quantidade de envios concluídos na janela do dia atual.
+
+    Usa o log de envios (uma linha por tentativa) como fonte de verdade, então
+    vale para qualquer campanha/processo que use o mesmo banco. Se a tabela de
+    log ainda não existir, cai para `leads.data_envio_whatsapp`.
+    """
+    desde = desde or inicio_da_janela_diaria()
+    p = backend.ph()
+    try:
+        total = backend.query_one(db.conn, f"""
+            SELECT COUNT(*) FROM whatsapp_envios_log
+            WHERE status = {p} AND data_envio >= {p}
+        """, ["enviado", desde])
+    except Exception:
+        total = backend.query_one(db.conn, f"""
+            SELECT COUNT(*) FROM leads
+            WHERE data_envio_whatsapp IS NOT NULL AND data_envio_whatsapp >= {p}
+        """, [desde])
+    return int((total or [0])[0] or 0)
+
+
+def resumo_limite_dia(db):
+    """(enviados_hoje, restante). `restante` é None quando não há teto diário."""
+    if not WAHA_LIMITE_DIA:
+        return 0, None
+    enviados = envios_hoje(db)
+    return enviados, max(0, WAHA_LIMITE_DIA - enviados)
 
 
 def _parse_cadencia(valor):
@@ -248,6 +387,12 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
     - intervalo: pausa fixa em segundos entre envios (usado se não houver cadência)
     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
+
+    Respeita dois tetos independentes:
+    - `leads`/`limite`: quantos enviar nesta campanha;
+    - `WAHA_LIMITE_DIA`: quantos enviar no dia (soma todas as campanhas).
+    E a janela de horário `WAHA_JANELA_ENVIO` (ex.: 08:00-19:00): fora dela nada
+    é enviado, e a campanha para se a janela fechar no meio.
     """
     mensagem_template = mensagem_template or MENSAGEM_PADRAO
     if leads is None:
@@ -258,6 +403,26 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
         return
 
     total = len(leads)
+
+    # Fora do horário permitido: não inicia a campanha.
+    if not janela_aberta():
+        aviso_fora_da_janela()
+        return
+
+    # Teto diário (soma todas as campanhas do dia, lido do log de envios).
+    enviados_hoje = 0
+    if WAHA_LIMITE_DIA:
+        enviados_hoje = envios_hoje(db)
+        restante_dia = WAHA_LIMITE_DIA - enviados_hoje
+        if restante_dia <= 0:
+            print(f"Limite diário atingido: {enviados_hoje}/{WAHA_LIMITE_DIA} envios hoje.")
+            print(f"Os envios voltam na próxima janela ({descrever_janela()}).")
+            return
+        if total > restante_dia:
+            print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} já enviados hoje; "
+                  f"reduzindo esta campanha para {restante_dia} envio(s).")
+            leads = leads.head(restante_dia)
+            total = len(leads)
 
     # Cadência aleatória (ex.: 3 a cada 60s) tem prioridade sobre o intervalo fixo.
     cadencia = _parse_cadencia(WAHA_CADENCIA)
@@ -271,6 +436,21 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
         print(f"Enviando para {total} lead(s), com intervalo fixo de {intervalo}s...")
 
     for i, (_, lead) in enumerate(leads.iterrows(), 1):
+        # Reconfere janela e teto a cada envio: cobre campanha longa que cruza
+        # o fim do horário permitido ou a virada do dia.
+        if not janela_aberta():
+            print(f"Janela de envio encerrada ({descrever_janela()}). "
+                  f"Interrompendo; os {total - i + 1} lead(s) restantes continuam "
+                  f"pendentes para o próximo horário.")
+            break
+
+        if WAHA_LIMITE_DIA:
+            enviados_hoje = envios_hoje(db)
+            if enviados_hoje >= WAHA_LIMITE_DIA:
+                print(f"Limite diário atingido ({enviados_hoje}/{WAHA_LIMITE_DIA}). "
+                      f"Interrompendo; os demais leads continuam pendentes.")
+                break
+
         texto = _renderizar_mensagem(mensagem_template, lead)
         lead_id = lead.get("lead_id")
         telefone = lead.get("telefone")

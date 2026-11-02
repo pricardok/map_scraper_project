@@ -173,24 +173,64 @@ Documentação do Projeto: MAP SCRAPER
     WAHA_ATIVO=true
     SOMENTE_ENVIO=false
     WAHA_INTERVALO=13
+    WAHA_CADENCIA=3:60
+    WAHA_JANELA_ENVIO=08:00-19:00
     WAHA_LIMITE=
+    WAHA_LIMITE_DIA=150
     ```
 
     Flags de comportamento:
     - WAHA_ATIVO: se false, desliga o envio de WhatsApp (não tenta enviar).
     - SOMENTE_ENVIO: se true, pula a coleta e vai direto para o envio
       (equivalente a rodar `python src/main.py --so-enviar`).
-    - WAHA_LIMITE: quantidade máxima de leads por campanha (vazio = sem limite).
+
+    Os quatro controles abaixo são independentes — não confunda:
+    - WAHA_CADENCIA (ritmo): "X a cada Y segundos". `3:60` = 3 mensagens por
+      minuto, com intervalos aleatórios. Vazio = usa WAHA_INTERVALO (pausa fixa
+      de 13s).
+    - WAHA_JANELA_ENVIO (horário): "INÍCIO-FIM". `08:00-19:00` = só no horário
+      comercial. Vazio = a qualquer hora. Aceita travessia de meia-noite
+      (`22:00-06:00`). Formato curto também vale (`8-19`).
+    - WAHA_LIMITE (campanha): máximo de leads por execução do envio.
+    - WAHA_LIMITE_DIA (dia): máximo de mensagens por dia, somando todas as
+      campanhas. Vazio/0 = sem teto diário.
+
+    Exemplo: `WAHA_CADENCIA=3:60` + `WAHA_JANELA_ENVIO=08:00-19:00` +
+    `WAHA_LIMITE_DIA=150` = 3 por minuto, apenas entre 8h e 19h, parando quando o
+    dia chegar a 150 envios. Os demais leads ficam pendentes para o dia
+    seguinte. Rodar de novo no mesmo dia não fura o teto: o contador vem do log
+    no banco, não da memória do processo.
+
+    Como a janela se comporta:
+    - Fora dela, o menu avisa e não envia nada (nem o teste) e mostra quando
+      reabre (ex.: "Próximo envio a partir de 03/11 às 08:00").
+    - Campanha que chega no fim da janela é interrompida no meio; os leads
+      restantes continuam pendentes para o próximo horário.
+    - O teto diário renova na **abertura da janela** (às 08:00 no exemplo), não
+      à meia-noite.
+    - Janela inválida (ex.: `25:00-19:00`) gera aviso e o envio fica liberado
+      24h, para não travar a operação por erro de digitação.
+
+    Observação: o envio de **teste** (antes da campanha) não é registrado no
+    log, então não consome o teto diário.
 
     Regras de envio (evita spam):
     - Só envia para leads com status = 'ativo'.
     - Só envia para tipo_telefone = 'Celular' (fixos são ignorados).
     - Só envia para leads ainda não enviados (status_whatsapp = 'pendente' ou NULL).
-    - Intervalo de WAHA_INTERVALO segundos entre envios.
+    - Intervalo de WAHA_INTERVALO segundos entre envios (se não houver cadência).
 
     Logs no banco:
     - status_whatsapp: 'pendente', 'enviado' ou 'falhou'.
     - data_envio_whatsapp: gravada apenas quando o envio é bem-sucedido.
+    - whatsapp_envios_log: uma linha por tentativa, com data_envio. É a fonte
+      usada para contar o teto diário (só status = 'enviado' conta).
+
+    Consultar o consumo do dia:
+    ```sql
+    SELECT COUNT(*) FROM whatsapp_envios_log
+    WHERE status = 'enviado' AND data_envio >= CURRENT_DATE;
+    ```
 
     A mensagem pode usar as variáveis {nome}, {bairro} e {cidade}.
 

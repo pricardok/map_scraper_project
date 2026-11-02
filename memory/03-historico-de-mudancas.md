@@ -4,6 +4,38 @@ Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
 
 ---
 
+## 2026-11-02 (segundo lote)
+
+### Janela de envio (`WAHA_JANELA_ENVIO`)
+
+- `WAHA_DIA_INICIO_HORA` (só a hora de início) foi substituída por
+  `WAHA_JANELA_ENVIO="08:00-19:00"`: horário de **início e fim**, vazio = 24h.
+- `whatsapp.py`: `_parse_janela`, `descrever_janela`, `janela_aberta`,
+  `proxima_abertura`, `aviso_fora_da_janela`. Aceita `8-19`, `08:00-19:00` e
+  atravessar a meia-noite; inválida → aviso e libera 24h.
+- Fora da janela o menu bloqueia (inclusive o teste) e informa a próxima
+  abertura. Campanha que chega no fim da janela é interrompida e deixa os leads
+  restantes pendentes.
+- O teto diário agora renova na **abertura da janela** (`inicio_da_janela_diaria`
+  usa o início dela), coerente com "horário comercial".
+
+### Teto diário de envios de WhatsApp (`WAHA_LIMITE_DIA`)
+
+- Antes existia só `WAHA_LIMITE` (**por campanha**, não por dia) e a cadência
+  `WAHA_CADENCIA` (ritmo, ex. `3:60` = 3/min). Não havia teto diário: rodar o
+  menu várias vezes no mesmo dia reiniciava a contagem.
+- Nova `WAHA_LIMITE_DIA` (vazio/0 = sem teto).
+- Contador em `whatsapp.py`: `inicio_da_janela_diaria()`, `envios_hoje(db)`
+  (COUNT em `whatsapp_envios_log` com `status='enviado'`; fallback para
+  `leads.data_envio_whatsapp` se o log não existir) e `resumo_limite_dia(db)`.
+- `disparar_campanha` corta o lote pelo restante do dia, aborta se o teto já
+  estourou e **reconfere a cada envio** (campanha longa que cruza a virada do
+  dia / outra campanha em paralelo).
+- Menu (`main.py`) mostra `enviados/teto` antes dos filtros, bloqueia quando
+  esgotado e usa o restante como padrão na pergunta de quantidade.
+- Índice `idx_whatsapp_envios_log_data (data_envio)` no `schema.py` (PG e DuckDB).
+- O contador é lido do banco, então reiniciar o programa/container não zera o dia.
+
 ## 2026-11-02
 
 ### Retomada de coleta (`coleta_progresso`)

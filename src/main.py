@@ -20,8 +20,13 @@ from src.database import LeadDatabase
 from src.whatsapp import (
     disparar_campanha,
     enviar_texto_numero,
+    aviso_fora_da_janela,
+    descrever_janela,
+    janela_aberta,
+    resumo_limite_dia,
     WAHA_INTERVALO,
     WAHA_LIMITE,
+    WAHA_LIMITE_DIA,
     WAHA_ATIVO,
     SOMENTE_ENVIO,
 )
@@ -194,6 +199,23 @@ def enviar_whatsapp_menu():
 
     mensagem = _escolher_template(templates)
 
+    # Fora do horário permitido não dá para enviar (nem teste).
+    if not janela_aberta():
+        aviso_fora_da_janela()
+        db.close()
+        return
+
+    # Teto diário: mostra o consumo e bloqueia quando esgotado.
+    enviados_hoje, restante_dia = resumo_limite_dia(db)
+    if restante_dia is not None:
+        print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} enviados. "
+              f"Restam {restante_dia}.")
+        if restante_dia <= 0:
+            print(f"Limite diário atingido. Os envios voltam na próxima janela "
+                  f"({descrever_janela()}).")
+            db.close()
+            return
+
     numero_f, cidade_f, nicho_f = _escolher_filtros()
 
     # Busca todos os pendentes (sem limitar ainda) para mostrar o total disponível.
@@ -210,12 +232,13 @@ def enviar_whatsapp_menu():
     total_disponivel = len(pendentes)
     print(f"\n{total_disponivel} lead(s) celular(es) pendentes (fixos são ignorados).")
 
-    # Quantidade (range): Enter = todos (respeitando o limite do .env, se houver).
+    # Quantidade (range): Enter = todos (respeitando os limites do .env).
+    padrao = total_disponivel
     if WAHA_LIMITE:
         print(f"Limite configurado no .env: {WAHA_LIMITE} lead(s) por campanha.")
-        padrao = WAHA_LIMITE
-    else:
-        padrao = total_disponivel
+        padrao = min(padrao, WAHA_LIMITE)
+    if restante_dia is not None:
+        padrao = min(padrao, restante_dia)
 
     entrada = input(
         f"Quantos leads enviar? (Enter = {padrao}): "
@@ -233,6 +256,10 @@ def enviar_whatsapp_menu():
     if WAHA_LIMITE and quantidade > WAHA_LIMITE:
         print(f"Ajustando para o limite do .env ({WAHA_LIMITE}).")
         quantidade = WAHA_LIMITE
+
+    if restante_dia is not None and quantidade > restante_dia:
+        print(f"Ajustando ao limite diário restante ({restante_dia}).")
+        quantidade = restante_dia
 
     quantidade = min(quantidade, total_disponivel)
     pendentes = pendentes.head(quantidade)
