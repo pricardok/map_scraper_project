@@ -199,10 +199,75 @@ entre `" - "` e `","`. Se não casar, `"Não Informado"`.
 
 ## Concorrência
 
-- `save_callback` é chamado **na thread principal** (dentro do loop de
-  `as_completed`), então não há escrita concorrente no banco.
+- O runner usa uma fila (`queue.Queue`) + N threads trabalhadoras
+  (`SCRAPER_THREADS`). Cada worker tem seu próprio Chromium (thread-local,
+  criado e fechado na mesma thread) e reusa entre as áreas da cidade.
+- Os workers **não** escrevem no banco: devolvem o resultado por outra fila e o
+  `save_callback` roda na thread principal, mantendo uma única conexão.
 - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
-- `lock` protege a lista `vistos`/`todos_leads`.
+- `vistos`/`todos_leads` são tocados só pela thread principal (não precisa de
+  lock).
+
+---
+
+## Retomada da coleta (`coleta_progresso`)
+
+- A fonte da verdade do "onde parou" é a tabela `coleta_progresso`
+  (`nicho, uf, cidade`) — **não** o `leads`, que não sabe se a cidade terminou.
+- Só `status='concluida'` é pulado. `em_andamento` (container morto no meio),
+  `parcial` (captcha/timeout em alguma área) e `erro` voltam para a fila no
+  próximo ciclo.
+- `RECAPTURA_DIAS=30` faz a cidade concluída voltar depois de 30 dias;
+  `0` = nunca refazer.
+- `SEMEAR_PROGRESSO=true` só roda quando a tabela está vazia e usa
+  `ON CONFLICT DO NOTHING`: nunca sobrescreve progresso real.
+- `RETOMAR_COLETA=false` restaura o comportamento antigo (refaz tudo a cada
+  ciclo) — útil para um "passe" completo de atualização.
+
+### Limite do seed a partir de `leads`
+
+`semear_progresso_de_leads` enxerga só cidades que **têm** lead. Cidade
+coletada que voltou vazia (comum em município pequeno) não aparece em `leads`,
+então é recolhida uma vez depois do restart — barato e sem duplicar.
+
+### Criar a tabela manualmente (PostgreSQL)
+
+A tabela é criada sozinha na primeira gravação (`_garantir_tabela_progresso`)
+e também por `python src/schema.py`. Se precisar criar na mão:
+
+```sql
+CREATE TABLE IF NOT EXISTS coleta_progresso (
+    nicho TEXT NOT NULL,
+    uf TEXT NOT NULL,
+    cidade TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pendente',
+    termos_total INTEGER,
+    leads_total INTEGER,
+    tentativas INTEGER DEFAULT 0,
+    erro TEXT,
+    iniciado_em TIMESTAMP,
+    atualizado_em TIMESTAMP,
+    concluido_em TIMESTAMP,
+    PRIMARY KEY (nicho, uf, cidade)
+);
+```
+
+Panorama:
+
+```sql
+SELECT uf, status, COUNT(*)
+FROM coleta_progresso
+GROUP BY uf, status ORDER BY uf, status;
+```
+
+## CPU: o gargalo é o Chromium, não o Python
+
+- `image`/`media`/`font` bloqueados (`BLOQUEAR_RECURSOS`) e flags de render
+  reduzem bastante o uso de CPU; a extração continua igual (DOM).
+- Escalar `SCRAPER_THREADS` acima de 3 não acelera: esbarra no
+  `_marcar_bloqueio_global` do Google. Em máquina pequena, 1–2 threads.
+- Se a CPU continuar em 100%, o próximo passo é limitar o container
+  (`cpus: 1.5` no compose) — não adianta reduzir sleep, que não consome CPU.
 
 ---
 

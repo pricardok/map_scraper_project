@@ -119,6 +119,22 @@ def _schema_duckdb(conn):
             PRIMARY KEY (id_municipio, nome)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS coleta_progresso (
+            nicho VARCHAR NOT NULL,
+            uf VARCHAR NOT NULL,
+            cidade VARCHAR NOT NULL,
+            status VARCHAR NOT NULL DEFAULT 'pendente',
+            termos_total INTEGER,
+            leads_total INTEGER,
+            tentativas INTEGER DEFAULT 0,
+            erro VARCHAR,
+            iniciado_em TIMESTAMP,
+            atualizado_em TIMESTAMP,
+            concluido_em TIMESTAMP,
+            PRIMARY KEY (nicho, uf, cidade)
+        )
+    """)
 
     # Seed com id fixo (o templates no DuckDB não tem auto-incremento).
     conn.execute("""
@@ -203,6 +219,22 @@ def _schema_postgres(conn):
             nome TEXT NOT NULL,
             id_distrito BIGINT,
             PRIMARY KEY (id_municipio, nome)
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS coleta_progresso (
+            nicho TEXT NOT NULL,
+            uf TEXT NOT NULL,
+            cidade TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pendente',
+            termos_total INTEGER,
+            leads_total INTEGER,
+            tentativas INTEGER DEFAULT 0,
+            erro TEXT,
+            iniciado_em TIMESTAMP,
+            atualizado_em TIMESTAMP,
+            concluido_em TIMESTAMP,
+            PRIMARY KEY (nicho, uf, cidade)
         )
     """)
 

@@ -14,6 +14,11 @@ ambiente — nada de `input()`. Toda a configuração vem do `.env`:
     EXPORTAR_EXCEL   gerar Excel por cidade (true/false, default false)
     LOOP             rodar em loop contínuo (true/false, default false)
     LOOP_PAUSA_SEGUNDOS pausa entre ciclos quando LOOP=true (default 3600)
+    RETOMAR_COLETA   pular cidades já concluídas (true/false, default true)
+    RECAPTURA_DIAS   refazer cidades concluídas há mais de N dias (default 30;
+                     0 = nunca refazer)
+    SEMEAR_PROGRESSO marcar como concluídas as cidades que já têm leads no banco
+                     na primeira execução (true/false, default true)
 
 Uso:
     python src/coleta_auto.py
@@ -21,6 +26,7 @@ Uso:
 import os
 import sys
 import time
+from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -47,6 +53,9 @@ MOSTRAR_NAVEGADOR = str_para_bool(os.environ.get("MOSTRAR_NAVEGADOR"), padrao=Fa
 EXPORTAR_EXCEL = str_para_bool(os.environ.get("EXPORTAR_EXCEL"), padrao=False)
 LOOP = str_para_bool(os.environ.get("LOOP"), padrao=False)
 LOOP_PAUSA_SEGUNDOS = max(0, env_int("LOOP_PAUSA_SEGUNDOS", 3600))
+RETOMAR = str_para_bool(os.environ.get("RETOMAR_COLETA"), padrao=True)
+RECAPTURA_DIAS = max(0, env_int("RECAPTURA_DIAS", 30))
+SEMEAR_PROGRESSO = str_para_bool(os.environ.get("SEMEAR_PROGRESSO"), padrao=True)
 
 
 def _resolver_ufs():
@@ -62,6 +71,10 @@ def _resolver_ufs():
 def _coletar_cidade(db, cidade, uf):
     print(f"\n=== {cidade}-{uf} ({NICHO}) ===")
     termos = obter_termos_busca(cidade, uf, max_bairros=MAX_BAIRROS)
+    if RETOMAR:
+        db.progresso_iniciar(NICHO, uf, cidade, len(termos))
+
+    stats = {}
     df = rodar_scraper_multithread(
         nicho=NICHO,
         cidade=cidade,
@@ -69,9 +82,64 @@ def _coletar_cidade(db, cidade, uf):
         termos_lista=termos,
         mostrar_navegador=MOSTRAR_NAVEGADOR,
         save_callback=db.save_leads,
+        estatisticas=stats,
     )
+
+    if RETOMAR:
+        # Área que falhou (bloqueio/timeout) deixa a cidade como parcial, para
+        # ser tentada de novo em vez de ficar 30 dias marcada como concluída.
+        if stats.get("areas_erro"):
+            db.progresso_parcial(
+                NICHO, uf, cidade, len(df),
+                f"{stats['areas_erro']}/{stats.get('areas_total', 0)} área(s) sem coleta",
+            )
+        else:
+            db.progresso_concluir(NICHO, uf, cidade, len(df))
+
     if EXPORTAR_EXCEL and not df.empty:
         db.export_to_excel(NICHO, cidade)
+
+
+def _cidade_ja_coletada(registro):
+    """True quando a cidade já foi concluída dentro da janela de recaptura.
+
+    Com RETOMAR_COLETA=false nada é pulado (comportamento antigo, que recomeça
+    o país inteiro a cada ciclo).
+    """
+    if not RETOMAR or not registro:
+        return False
+    if (registro.get("status") or "").lower() != "concluida":
+        return False
+    if RECAPTURA_DIAS <= 0:
+        return True
+
+    concluido = registro.get("concluido_em")
+    if concluido is None:
+        return True
+    return concluido >= datetime.now() - timedelta(days=RECAPTURA_DIAS)
+
+
+def _carregar_progresso(db):
+    """Carrega o progresso do nicho, semeando a partir dos leads na 1ª execução."""
+    if not RETOMAR:
+        return {}
+
+    progresso = db.progresso_carregar(NICHO)
+    if not progresso and SEMEAR_PROGRESSO:
+        semeadas = db.semear_progresso_de_leads(NICHO)
+        if semeadas:
+            print(f"[progresso] {semeadas} cidade(s) com leads já gravados foram "
+                  f"marcadas como concluídas (SEMEAR_PROGRESSO=true).")
+        progresso = db.progresso_carregar(NICHO)
+
+    if progresso:
+        concluidas = sum(
+            1 for r in progresso.values()
+            if (r.get("status") or "").lower() == "concluida"
+        )
+        print(f"[progresso] {concluidas} cidade(s) concluída(s) no banco "
+              f"(recaptura após {RECAPTURA_DIAS} dia(s)).")
+    return progresso
 
 
 def executar_ciclo():
@@ -85,6 +153,8 @@ def executar_ciclo():
             print("Nenhuma UF disponível. Abortando ciclo.")
             return
 
+        progresso = _carregar_progresso(db)
+
         for uf in ufs:
             cidades = obter_cidades(uf)
             if not cidades:
@@ -94,22 +164,34 @@ def executar_ciclo():
             if AQUECER_BAIRROS:
                 aquecer_bairros_uf(uf, max_cidades=MAX_CIDADES)
 
-            if MAX_CIDADES:
-                cidades = cidades[:MAX_CIDADES]
+            pendentes = [c for c in cidades if not _cidade_ja_coletada(progresso.get((uf, c)))]
+            if not pendentes:
+                print(f"[{uf}] {len(cidades)} cidade(s) já coletada(s). Pulando.")
+                continue
 
-            print(f"\n[{uf}] {len(cidades)} cidade(s) a coletar (nicho={NICHO}).")
-            for cidade in cidades:
+            if MAX_CIDADES:
+                pendentes = pendentes[:MAX_CIDADES]
+
+            print(f"\n[{uf}] {len(pendentes)} de {len(cidades)} cidade(s) pendente(s) "
+                  f"(nicho={NICHO}).")
+            for cidade in pendentes:
                 try:
                     _coletar_cidade(db, cidade, uf)
                 except Exception as e:
                     print(f"[{cidade}-{uf}] ERRO: {type(e).__name__}: {e}")
+                    if RETOMAR:
+                        try:
+                            db.progresso_erro(NICHO, uf, cidade, f"{type(e).__name__}: {e}")
+                        except Exception:
+                            pass
     finally:
         db.close()
 
 
 def main():
     print(f"Map Scraper (auto) | nicho={NICHO} | UFs={UFS or 'todas'} | "
-          f"max_cidades={MAX_CIDADES or 'todas'} | loop={LOOP}")
+          f"max_cidades={MAX_CIDADES or 'todas'} | loop={LOOP} | "
+          f"retomar={RETOMAR} | recaptura={RECAPTURA_DIAS}d")
     while True:
         executar_ciclo()
         if not LOOP:

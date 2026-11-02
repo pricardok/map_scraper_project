@@ -156,14 +156,22 @@ sincronizar_base_localidades() -> bool        # nacional; bloqueada se SALVAR=fa
 ```python
 extrair_leads_local(nicho, termo_busca, cidade, uf, mostrar_navegador=False) -> list[dict]
 rodar_scraper_multithread(nicho, cidade, uf, termos_lista,
-                          mostrar_navegador=False, save_callback=None) -> DataFrame
+                          mostrar_navegador=False, save_callback=None,
+                          estatisticas=None) -> DataFrame
 ```
 
-- `max_workers = min(3, len(termos_lista))`.
-- `save_callback(df)` é chamado a cada área concluída (salvamento incremental).
+- `max_workers = min(SCRAPER_THREADS, len(termos_lista))` (padrão 3).
+- Worker reusa o Chromium entre as áreas (thread-local) e abre um contexto
+  isolado por termo; `MAX_CONTEXTOS_POR_NAVEGADOR` (padrão 40) recicla o browser.
+- `save_callback(df)` é chamado a cada área concluída, **na thread principal**.
+- `estatisticas` recebe `areas_total`, `areas_ok`, `areas_erro` (bloqueio/timeout)
+  — usado pelo `coleta_auto` para marcar a cidade como `parcial`.
 - Deduplicação intra-execução por `(nome, cidade)`.
 - Dict de lead: `nome, telefone, tipo_telefone, whatsapp_link, instagram, site,
   bairro, cidade, estado, nicho`.
+
+Desempenho: `BLOQUEAR_RECURSOS` (padrão true) aborta `image`/`media`/`font`;
+a contagem de perfis na rolagem é feita em JS (`_CONTAR_PERFIS_JS`).
 
 Rolagem: `MAX_ROLAGENS = 40`, para após `MAX_RODADAS_ESTAGNADAS = 3` rodadas sem
 crescimento.
@@ -229,6 +237,24 @@ salvar_log_envio(lead_id, nome, cidade, telefone, chat_id, status, ...)
 listar_templates_ativos()      # [{id, mensagem, descricao, segmento, ativo}]
 export_to_excel(nicho, cidade) # output/leads_{nicho}_{cidade}.xlsx
 close()
+```
+
+Tabela `coleta_progresso` (retomada da coleta nacional; criada on-demand):
+
+```
+nicho, uf, cidade — PK (nicho, uf, cidade)
+status ('pendente'|'em_andamento'|'concluida'|'parcial'|'erro'),
+termos_total, leads_total, tentativas, erro,
+iniciado_em, atualizado_em, concluido_em
+```
+
+```python
+progresso_carregar(nicho)      # {(uf, cidade): {status, tentativas, ...}}
+progresso_iniciar(nicho, uf, cidade, termos_total)   # em_andamento, tentativas+1
+progresso_concluir(nicho, uf, cidade, leads_total)
+progresso_parcial(nicho, uf, cidade, leads_total, motivo)  # retenta no próximo ciclo
+progresso_erro(nicho, uf, cidade, erro)
+semear_progresso_de_leads(nicho)  # cidades que já têm leads -> concluida (DO NOTHING)
 ```
 
 - `get_leads_para_envio`: `numero` compara por dígitos (regex `[^0-9]` removido),

@@ -1,15 +1,14 @@
 # src/scraper.py
 from playwright.sync_api import sync_playwright
+import os
+import queue
 import time
 import random
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import threading
-from src.config import env_int
+from src.config import env_int, str_para_bool
 from src.utils import formatar_telefone
-
-lock = threading.Lock()
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -19,6 +18,49 @@ USER_AGENT = (
 
 MAX_ROLAGENS = 40
 MAX_RODADAS_ESTAGNADAS = 3
+
+# --- Desempenho ---------------------------------------------------------------
+# SCRAPER_THREADS: navegadores rodando em paralelo por cidade. Cada Chromium é
+#   um processo pesado; em VPS pequena use 1 ou 2 para não saturar a CPU.
+# BLOQUEAR_RECURSOS: desliga imagens no próprio Chromium e aborta mídia/fontes
+#   (o Google Maps carrega muita imagem). A extração é feita no DOM
+#   (texto/atributos), então não é afetada.
+SCRAPER_THREADS = max(1, env_int("SCRAPER_THREADS", 3))
+BLOQUEAR_RECURSOS = str_para_bool(os.environ.get("BLOQUEAR_RECURSOS"), padrao=True)
+# Recicla o Chromium a cada N áreas para conter crescimento de memória em
+# execuções longas (o mesmo browser é reutilizado entre as áreas).
+MAX_CONTEXTOS_POR_NAVEGADOR = max(1, env_int("MAX_CONTEXTOS_POR_NAVEGADOR", 40))
+
+_TIPOS_BLOQUEADOS = ("media", "font")
+
+# Flags que reduzem trabalho de renderização/rede do Chromium.
+_CHROMIUM_ARGS = (
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--disable-sync",
+    "--disable-default-apps",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--mute-audio",
+)
+
+
+def _args_chromium():
+    """Flags do Chromium; desligar imagens no próprio browser é mais barato que
+    interceptar cada requisição no Python."""
+    args = list(_CHROMIUM_ARGS)
+    if BLOQUEAR_RECURSOS:
+        args.append("--blink-settings=imagesEnabled=false")
+    return args
+
+# Reaproveitamento de navegador por thread: um Chromium novo por termo de busca
+# era o maior gasto de CPU do processo. Agora cada worker reusa o mesmo browser
+# e abre apenas um contexto isolado por termo.
+_tls = threading.local()
 
 # --- Anti-bloqueio (captcha) -------------------------------------------------
 # CAPTCHA_MAX_TENTATIVAS: quantas vezes uma mesma página é tentada antes de
@@ -123,6 +165,59 @@ def _pausar_com_aviso(segundos, termo):
         restante -= passo
 
 
+def _navegador_local(mostrar_navegador=False):
+    """Playwright + Chromium reaproveitados na thread atual."""
+    browser = getattr(_tls, "browser", None)
+    if browser is not None:
+        try:
+            if (browser.is_connected()
+                    and getattr(_tls, "contextos", 0) < MAX_CONTEXTOS_POR_NAVEGADOR):
+                _tls.contextos = getattr(_tls, "contextos", 0) + 1
+                return browser
+        except Exception:
+            pass
+    fechar_navegador_local()
+
+    playwright = sync_playwright().start()
+    _tls.playwright = playwright
+    _tls.browser = playwright.chromium.launch(
+        headless=not mostrar_navegador,
+        args=_args_chromium(),
+    )
+    _tls.contextos = 1
+    return _tls.browser
+
+
+def fechar_navegador_local():
+    """Fecha o navegador da thread atual (chamado ao encerrar cada worker)."""
+    browser = getattr(_tls, "browser", None)
+    playwright = getattr(_tls, "playwright", None)
+    _tls.browser = None
+    _tls.playwright = None
+    _tls.contextos = 0
+    if browser is not None:
+        try:
+            browser.close()
+        except Exception:
+            pass
+    if playwright is not None:
+        try:
+            playwright.stop()
+        except Exception:
+            pass
+
+
+def _bloquear_recurso(route):
+    """Aborta mídia e fontes (imagens já são desligadas por flag no browser)."""
+    try:
+        if route.request.resource_type in _TIPOS_BLOQUEADOS:
+            route.abort()
+        else:
+            route.continue_()
+    except Exception:
+        pass
+
+
 def _navegar_com_retry(page, url, tentativas=3, timeout=30000, termo="?"):
     """Navega com retry e backoff; detecta captcha e aplica pausa longa.
 
@@ -161,6 +256,17 @@ def _obter_urls_perfis(page):
     return urls
 
 
+# Conta os perfis direto no navegador: evita centenas de idas e voltas
+# (query_selector_all + get_attribute) a cada rolagem.
+_CONTAR_PERFIS_JS = """() => {
+    const vistos = new Set();
+    for (const a of document.querySelectorAll('a[href*="/maps/place/"]')) {
+        vistos.add(a.href);
+    }
+    return vistos.size;
+}"""
+
+
 def _rolar_resultados(page, termo="?"):
     """Rola a lista até esgotar os resultados (ou atingir o limite de rolagens)."""
     ultimo_total = 0
@@ -170,7 +276,7 @@ def _rolar_resultados(page, termo="?"):
             _marcar_bloqueio_global()
             raise BloqueioDetectado(termo)
 
-        total = len(_obter_urls_perfis(page))
+        total = page.evaluate(_CONTAR_PERFIS_JS) or 0
         page.evaluate('''() => {
             const feed = document.querySelector('div[role="feed"]');
             if(feed) feed.scrollTop = feed.scrollHeight;
@@ -190,20 +296,23 @@ def extrair_leads_local(nicho, termo_busca, cidade, uf, mostrar_navegador=False)
     query = _montar_query(nicho, termo_busca, cidade, uf)
     url = f"https://www.google.com/maps/search/{urllib.parse.quote(query)}"
     leads = []
+    _tls.area_incompleta = False
 
-    p = sync_playwright().start()
-    browser = None
+    context = None
     try:
-        browser = p.chromium.launch(headless=not mostrar_navegador)
+        browser = _navegador_local(mostrar_navegador)
         context = browser.new_context(
             user_agent=USER_AGENT,
             viewport={"width": 1366, "height": 768},
             locale="pt-BR",
         )
+        if BLOQUEAR_RECURSOS:
+            context.route("**/*", _bloquear_recurso)
         page = context.new_page()
 
         if not _navegar_com_retry(page, url, timeout=60000, termo=termo_busca):
             print(f"[{termo_busca}] Falha ao carregar a busca.")
+            _tls.area_incompleta = True
             return leads
 
         try:
@@ -265,11 +374,9 @@ def extrair_leads_local(nicho, termo_busca, cidade, uf, mostrar_navegador=False)
                 if site_elem:
                     link_site = site_elem.get_attribute('href')
 
-                for a in page.query_selector_all('a'):
-                    href = a.get_attribute('href')
-                    if href and "instagram.com" in href:
-                        link_insta = href
-                        break
+                insta_elem = page.query_selector('a[href*="instagram.com"]')
+                if insta_elem:
+                    link_insta = insta_elem.get_attribute('href') or ""
 
                 leads.append({
                     'nome': nome,
@@ -291,50 +398,109 @@ def extrair_leads_local(nicho, termo_busca, cidade, uf, mostrar_navegador=False)
                 print(f"[{termo_busca}] Erro ao extrair {place_url}: {e}")
 
     except BloqueioDetectado:
+        _tls.area_incompleta = True
         print(f"[{termo_busca}] Área interrompida por bloqueio do Google Maps "
               f"({len(leads)} lead(s) preservado(s)).")
     finally:
-        if browser:
-            browser.close()
-        p.stop()
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
 
     return leads
 
 
-def rodar_scraper_multithread(nicho, cidade, uf, termos_lista, mostrar_navegador=False, save_callback=None):
+def rodar_scraper_multithread(nicho, cidade, uf, termos_lista, mostrar_navegador=False,
+                              save_callback=None, estatisticas=None):
     """
     Executa a coleta em multithread. Se save_callback for informado, cada lote
     (por área) é salvo assim que termina, evitando perder a coleta em caso de falha.
+
+    Os workers reutilizam o mesmo Chromium entre as áreas (cada área abre apenas
+    um contexto isolado) e o processamento/persistência acontece na thread
+    principal, mantendo o acesso ao banco em uma única conexão.
+
+    `estatisticas`, quando informado, recebe `areas_total`, `areas_ok` e
+    `areas_erro` (áreas que terminaram sem coleta: bloqueio, timeout, crash).
     """
     todos_leads = []
     vistos = set()
-    max_workers = min(3, len(termos_lista))
+    if estatisticas is not None:
+        estatisticas.update({"areas_total": len(termos_lista), "areas_ok": 0, "areas_erro": 0})
+    if not termos_lista:
+        return pd.DataFrame(todos_leads)
+
+    max_workers = min(SCRAPER_THREADS, len(termos_lista))
     print(f"Iniciando scraper com {max_workers} threads em {len(termos_lista)} área(s)...")
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futuros = {
-            executor.submit(extrair_leads_local, nicho, termo, cidade, uf, mostrar_navegador): termo
-            for termo in termos_lista
-        }
+    pendentes = queue.Queue()
+    for termo in termos_lista:
+        pendentes.put(termo)
+    resultados = queue.Queue()
 
-        for futuro in as_completed(futuros):
-            termo = futuros[futuro]
-            try:
-                leads_area = futuro.result()
-                with lock:
-                    novos = []
-                    for lead in leads_area:
-                        chave = (lead['nome'], lead['cidade'])
-                        if chave not in vistos:
-                            vistos.add(chave)
-                            novos.append(lead)
-                    todos_leads.extend(novos)
+    def _trabalhador():
+        try:
+            while True:
+                try:
+                    termo = pendentes.get_nowait()
+                except queue.Empty:
+                    return
+                try:
+                    leads_area = extrair_leads_local(
+                        nicho, termo, cidade, uf, mostrar_navegador
+                    )
+                    resultados.put(
+                        (termo, leads_area, None, getattr(_tls, "area_incompleta", False))
+                    )
+                except Exception as e:
+                    resultados.put((termo, None, e, False))
+        finally:
+            fechar_navegador_local()
 
-                if novos and save_callback:
-                    save_callback(pd.DataFrame(novos))
+    threads = [
+        threading.Thread(target=_trabalhador, daemon=True)
+        for _ in range(max_workers)
+    ]
+    for t in threads:
+        t.start()
 
-                print(f"[{termo}] Finalizado. {len(novos)} leads novos (acumulado: {len(todos_leads)}).")
-            except Exception as e:
-                print(f"Erro na busca {termo}: {e}")
+    restantes = len(termos_lista)
+    while restantes:
+        try:
+            termo, leads_area, erro, incompleta = resultados.get(timeout=0.5)
+        except queue.Empty:
+            if not any(t.is_alive() for t in threads):
+                break
+            continue
+
+        restantes -= 1
+        if incompleta and estatisticas is not None:
+            estatisticas["areas_erro"] += 1
+
+        if erro is not None:
+            print(f"Erro na busca {termo}: {erro}")
+            if estatisticas is not None:
+                estatisticas["areas_erro"] += 1
+            continue
+
+        novos = []
+        for lead in leads_area:
+            chave = (lead['nome'], lead['cidade'])
+            if chave not in vistos:
+                vistos.add(chave)
+                novos.append(lead)
+        todos_leads.extend(novos)
+
+        if estatisticas is not None:
+            estatisticas["areas_ok"] += 1
+
+        if novos and save_callback:
+            save_callback(pd.DataFrame(novos))
+
+        print(f"[{termo}] Finalizado. {len(novos)} leads novos (acumulado: {len(todos_leads)}).")
+
+    for t in threads:
+        t.join(timeout=30)
 
     return pd.DataFrame(todos_leads)

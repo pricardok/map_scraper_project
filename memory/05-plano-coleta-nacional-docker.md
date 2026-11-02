@@ -177,6 +177,11 @@ municipios_populacao (id_municipio VARCHAR PRIMARY KEY, populacao INTEGER, atual
 Efeito: rodar de novo não duplica; parar no meio não perde; dá para acompanhar
 progresso por UF/cidade com uma query.
 
+> **Já implementado (versão leve):** `coleta_progresso` + `RETOMAR_COLETA`
+> dão retomada por cidade e skip de concluídas com janela de recaptura
+> (`RECAPTURA_DIAS`). O `coleta_jobs`/`planner.py` com prioridade por população
+> continua sendo o passo seguinte (F1).
+
 **Expectativa realista (IP único, 2–3 threads):** ~2,5 min por termo,
 ~30 bairros por cidade ⇒ ~30–40 min por cidade ⇒ 5.571 municípios ≈
 **2.000–3.000 h por nicho**. Por isso o tier 1–2 entrega valor nas primeiras

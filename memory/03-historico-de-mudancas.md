@@ -4,6 +4,48 @@ Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
 
 ---
 
+## 2026-11-02
+
+### Retomada de coleta (`coleta_progresso`)
+
+- Antes: cada ciclo do `coleta_auto.py` percorria **todas** as UFs/cidades do
+  zero. Parar o container no meio de uma coleta nacional significava recomeçar
+  do Acre (os leads já gravados não duplicavam por causa do UPSERT, mas o
+  trabalho era refeito).
+- Nova tabela `coleta_progresso` (`nicho`, `uf`, `cidade` PK; `status`,
+  `termos_total`, `leads_total`, `tentativas`, `erro`, timestamps), criada de
+  forma idempotente pelo `LeadDatabase` na primeira gravação e também no
+  `schema.py`.
+- `LeadDatabase`: `progresso_carregar/iniciar/concluir/parcial/erro` e
+  `semear_progresso_de_leads`.
+- `coleta_auto.py`: `RETOMAR_COLETA=true` (padrão) filtra cidades já
+  concluídas; `RECAPTURA_DIAS` (padrão 30; `0` = nunca refazer) define quando
+  uma cidade concluída volta para a fila.
+- Cidade com área bloqueada (captcha/timeout) fica `parcial` e é tentada de
+  novo no ciclo seguinte — não fica 30 dias marcada como concluída.
+- `SEMEAR_PROGRESSO=true` (padrão): na primeira execução com a tabela vazia,
+  cidades que já têm leads no banco viram `concluida` (retoma uma coleta que
+  rodou antes deste recurso). Nunca sobrescreve progresso existente.
+- Validado nos dois backends: PostgreSQL (produção — tabela criada e semeada com
+  405 cidades, 5.166 restantes das 5.571) e DuckDB (setup novo).
+
+### CPU do scraper
+
+- Navegador reaproveitado por thread: antes cada termo de busca abria um
+  Chromium novo (~30 launches por cidade). Agora cada worker mantém um Chromium
+  e abre só um contexto isolado por termo, reciclando o browser a cada
+  `MAX_CONTEXTOS_POR_NAVEGADOR` (padrão 40) para conter memória.
+- `BLOQUEAR_RECURSOS=true` (padrão) aborta `image`/`media`/`font` — a extração
+  é no DOM, então nada de dados se perde e a CPU cai.
+- Flags do Chromium para reduzir trabalho de renderização/rede.
+- Contagem de perfis na rolagem passou a ser feita em JS (`page.evaluate`) em
+  vez de `query_selector_all` + `get_attribute` por link a cada rolagem.
+- Busca de Instagram usa seletor direto (`a[href*="instagram.com"]`).
+- `SCRAPER_THREADS` (padrão 3) configurável: em VPS pequena, 1 ou 2.
+- Runner passou a usar fila + workers (`queue`) com persistência na thread
+  principal; `estatisticas` informa `areas_total/areas_ok/areas_erro`.
+
+
 ## 2026-10-31
 
 ### Migração para PostgreSQL + suporte dual (PostgreSQL/DuckDB)

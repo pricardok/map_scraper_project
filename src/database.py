@@ -18,6 +18,7 @@ from src import backend
 class LeadDatabase:
     def __init__(self, conn=None):
         self.conn = conn if conn is not None else backend.conectar()
+        self._progresso_pronto = False
 
     def listar_templates_ativos(self):
         """Retorna os templates ativos como lista de dicionários (id, mensagem, descricao, segmento, ativo)."""
@@ -200,6 +201,150 @@ class LeadDatabase:
         nome_arquivo = f"output/leads_{nicho}_{cidade}.xlsx".replace(" ", "_").lower()
         df.to_excel(nome_arquivo, index=False)
         print(f"🎉 Exportação concluída: {nome_arquivo} ({len(df)} leads ativos)")
+
+    # ------------------------------------------------------------------
+    # Progresso da coleta (permite retomar de onde parou)
+    # ------------------------------------------------------------------
+    def _garantir_tabela_progresso(self):
+        """Cria `coleta_progresso` na primeira utilização (idempotente)."""
+        if self._progresso_pronto:
+            return
+
+        tipo = "VARCHAR" if backend.IS_DUCKDB else "TEXT"
+        backend.execute(self.conn, f"""
+            CREATE TABLE IF NOT EXISTS coleta_progresso (
+                nicho {tipo} NOT NULL,
+                uf {tipo} NOT NULL,
+                cidade {tipo} NOT NULL,
+                status {tipo} NOT NULL DEFAULT 'pendente',
+                termos_total INTEGER,
+                leads_total INTEGER,
+                tentativas INTEGER DEFAULT 0,
+                erro {tipo},
+                iniciado_em TIMESTAMP,
+                atualizado_em TIMESTAMP,
+                concluido_em TIMESTAMP,
+                PRIMARY KEY (nicho, uf, cidade)
+            )
+        """)
+        backend.commit(self.conn)
+        self._progresso_pronto = True
+
+    def progresso_carregar(self, nicho):
+        """Retorna {(uf, cidade): {status, tentativas, leads_total, concluido_em}}."""
+        self._garantir_tabela_progresso()
+        p = backend.ph()
+        linhas = backend.query_all(self.conn, f"""
+            SELECT uf, cidade, status, tentativas, leads_total, concluido_em
+            FROM coleta_progresso
+            WHERE nicho = {p}
+        """, [nicho])
+        return {
+            (uf, cidade): {
+                "status": status,
+                "tentativas": tentativas or 0,
+                "leads_total": leads_total or 0,
+                "concluido_em": concluido_em,
+            }
+            for uf, cidade, status, tentativas, leads_total, concluido_em in linhas
+        }
+
+    def progresso_iniciar(self, nicho, uf, cidade, termos_total):
+        """Marca a cidade como em andamento (incrementa o contador de tentativas)."""
+        self._garantir_tabela_progresso()
+        p = backend.ph()
+        linha = backend.query_one(self.conn, f"""
+            SELECT tentativas FROM coleta_progresso
+            WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+        """, [nicho, uf, cidade])
+        tentativas = (int(linha[0] or 0) if linha else 0) + 1
+        agora = datetime.now()
+        backend.execute(self.conn, f"""
+            INSERT INTO coleta_progresso
+                (nicho, uf, cidade, status, termos_total, tentativas,
+                 erro, iniciado_em, atualizado_em, concluido_em)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, NULL, {p}, {p}, NULL)
+            ON CONFLICT (nicho, uf, cidade) DO UPDATE SET
+                status = excluded.status,
+                termos_total = excluded.termos_total,
+                tentativas = excluded.tentativas,
+                erro = NULL,
+                iniciado_em = excluded.iniciado_em,
+                atualizado_em = excluded.atualizado_em,
+                concluido_em = NULL
+        """, [nicho, uf, cidade, "em_andamento", int(termos_total), tentativas, agora, agora])
+        backend.commit(self.conn)
+
+    def progresso_concluir(self, nicho, uf, cidade, leads_total=0):
+        """Marca a cidade como concluída."""
+        self._garantir_tabela_progresso()
+        p = backend.ph()
+        agora = datetime.now()
+        backend.execute(self.conn, f"""
+            UPDATE coleta_progresso
+            SET status = {p}, leads_total = {p}, erro = NULL,
+                atualizado_em = {p}, concluido_em = {p}
+            WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+        """, ["concluida", int(leads_total or 0), agora, agora, nicho, uf, cidade])
+        backend.commit(self.conn)
+
+    def progresso_erro(self, nicho, uf, cidade, erro):
+        """Registra a falha da cidade (será tentada novamente no próximo ciclo)."""
+        self._garantir_tabela_progresso()
+        p = backend.ph()
+        backend.execute(self.conn, f"""
+            UPDATE coleta_progresso
+            SET status = {p}, erro = {p}, atualizado_em = {p}
+            WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+        """, ["erro", str(erro)[:500], datetime.now(), nicho, uf, cidade])
+        backend.commit(self.conn)
+
+    def progresso_parcial(self, nicho, uf, cidade, leads_total, motivo):
+        """Cidade coletada em parte (bloqueio/timeout em alguma área).
+
+        Fica fora do filtro de "concluída" para ser tentada de novo no próximo
+        ciclo, sem perder os leads já gravados.
+        """
+        self._garantir_tabela_progresso()
+        p = backend.ph()
+        backend.execute(self.conn, f"""
+            UPDATE coleta_progresso
+            SET status = {p}, leads_total = {p}, erro = {p}, atualizado_em = {p}
+            WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+        """, ["parcial", int(leads_total or 0), str(motivo)[:500], datetime.now(),
+              nicho, uf, cidade])
+        backend.commit(self.conn)
+
+    def semear_progresso_de_leads(self, nicho):
+        """Marca como concluídas as cidades que já possuem leads no banco.
+
+        Serve para retomar a partir de uma coleta que rodou antes de existir o
+        progresso. É idempotente e nunca sobrescreve um registro já existente.
+        Retorna quantas cidades foram marcadas.
+        """
+        self._garantir_tabela_progresso()
+        p = backend.ph()
+        linhas = backend.query_all(self.conn, f"""
+            SELECT estado, cidade, COUNT(*) AS total, MAX(data_extracao) AS ultima
+            FROM leads
+            WHERE nicho = {p} AND estado IS NOT NULL AND cidade IS NOT NULL
+            GROUP BY estado, cidade
+        """, [nicho])
+
+        agora = datetime.now()
+        for uf, cidade, total, ultima in linhas:
+            backend.execute(self.conn, f"""
+                INSERT INTO coleta_progresso
+                    (nicho, uf, cidade, status, leads_total, tentativas,
+                     iniciado_em, atualizado_em, concluido_em)
+                VALUES ({p}, {p}, {p}, {p}, {p}, 1, {p}, {p}, {p})
+                ON CONFLICT (nicho, uf, cidade) DO NOTHING
+            """, [
+                nicho, uf, cidade, "concluida", int(total or 0),
+                ultima or agora, ultima or agora, ultima or agora,
+            ])
+        backend.commit(self.conn)
+        return len(linhas)
 
     def close(self):
         backend.close(self.conn)

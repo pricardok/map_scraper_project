@@ -18,6 +18,13 @@ services:
       EXPORTAR_EXCEL: ${EXPORTAR_EXCEL:-false}
       LOOP: ${LOOP:-false}
       LOOP_PAUSA_SEGUNDOS: ${LOOP_PAUSA_SEGUNDOS:-3600}
+      # Retomada de onde parou + desempenho.
+      RETOMAR_COLETA: ${RETOMAR_COLETA:-true}
+      RECAPTURA_DIAS: ${RECAPTURA_DIAS:-30}
+      SEMEAR_PROGRESSO: ${SEMEAR_PROGRESSO:-true}
+      SCRAPER_THREADS: ${SCRAPER_THREADS:-3}
+      BLOQUEAR_RECURSOS: ${BLOQUEAR_RECURSOS:-true}
+      MAX_CONTEXTOS_POR_NAVEGADOR: ${MAX_CONTEXTOS_POR_NAVEGADOR:-40}
     volumes:
       # Banco local (modo DB_ENGINE=duckdb) e Excel gerado.
       - ./data:/app/data
