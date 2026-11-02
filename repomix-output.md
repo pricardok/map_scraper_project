@@ -727,302 +727,6 @@ requirements.txt
 84: DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
 ````
 
-## File: src/schema.py
-````python
-  1: # src/schema.py
-  2: """Criação e população do schema do banco (setup inicial + migração).
-  3: 
-  4: Suporta PostgreSQL e DuckDB (definido por `DB_ENGINE` no `.env`). Separação de
-  5: responsabilidades:
-  6: - `database.py` / `localidades_db.py` apenas CONECTAM e operam sobre um schema
-  7:   já existente.
-  8: - Este módulo CRIA as tabelas/sequences e POPULA os templates. Rode uma vez ao
-  9:   iniciar do zero (ou após mudar de banco):
- 10: 
- 11:       python src/schema.py
- 12: 
- 13: É idempotente: pode rodar de novo sem perder dados.
- 14: """
- 15: import os
- 16: import sys
- 17: 
- 18: sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
- 19: 
- 20: from src import backend
- 21: from src.config import DB_ENGINE
- 22: 
- 23: # Template padrão de WhatsApp, usado para popular a tabela de templates.
- 24: # Segmento indica o nicho para o qual a mensagem foi criada (ex.: barbearias).
- 25: # O markdown (**negrito**) é limpo antes do envio real no whatsapp.py.
- 26: TEMPLATE_AGRUPAMENTO_PADRAO = """Opa, tudo certo?
- 27: 
- 28: Conhece o **Agendamento Já**? É uma plataforma 100% online para deixar sua agenda no piloto automático e acabar com a dor de cabeça de gerenciar horários pelo WhatsApp.
- 29: 
- 30: Com planos a partir de **R$ 29,90** no nosso aplicativo você consegue:
- 31: 
- 32: • Personalizar com a identidade da sua marca
- 33: • Lembretes automatizados via Whatsapp
- 34: • Divulgação de horários automatizadas
- 35: • Controle de faturamento
- 36: • Pagamentos antecipados
- 37: 
- 38: **Conheça nossa proposta**: https://agendamentoja.com/
- 39: **Acompanhe nosso dia a dia**: https://www.instagram.com/agendamentoja_
- 40: 
- 41: Quer ver uma demonstração rápida de como funciona na prática para o seu tipo de serviço? É só me avisar!"""
- 42: 
- 43: # Segmento (nicho) padrão do template acima.
- 44: TEMPLATE_SEGMENTO_PADRAO = "barbearias"
- 45: 
- 46: 
- 47: def _schema_duckdb(conn):
- 48:     """Schema do DuckDB local (ids via sequences; templates com id fixo)."""
- 49:     conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_leads_id")
- 50:     conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_whatsapp_envios_log_id")
- 51: 
- 52:     conn.execute("""
- 53:         CREATE TABLE IF NOT EXISTS leads (
- 54:             lead_id INTEGER DEFAULT nextval('seq_leads_id'),
- 55:             nome VARCHAR,
- 56:             telefone VARCHAR,
- 57:             tipo_telefone VARCHAR,
- 58:             whatsapp_link VARCHAR,
- 59:             instagram VARCHAR,
- 60:             site VARCHAR,
- 61:             bairro VARCHAR,
- 62:             cidade VARCHAR,
- 63:             estado VARCHAR,
- 64:             nicho VARCHAR,
- 65:             status VARCHAR DEFAULT 'ativo',
- 66:             data_extracao TIMESTAMP,
- 67:             data_envio_whatsapp TIMESTAMP,
- 68:             status_whatsapp VARCHAR DEFAULT 'pendente',
- 69:             chat_id_waha VARCHAR,
- 70:             PRIMARY KEY (lead_id),
- 71:             UNIQUE (nome, cidade)
- 72:         )
- 73:     """)
- 74:     conn.execute("""
- 75:         CREATE TABLE IF NOT EXISTS templates_whatsapp (
- 76:             id INTEGER PRIMARY KEY,
- 77:             mensagem VARCHAR,
- 78:             descricao VARCHAR,
- 79:             segmento VARCHAR,
- 80:             ativo BOOLEAN DEFAULT TRUE
- 81:         )
- 82:     """)
- 83:     conn.execute("""
- 84:         CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
- 85:             id INTEGER DEFAULT nextval('seq_whatsapp_envios_log_id'),
- 86:             lead_id INTEGER,
- 87:             nome VARCHAR,
- 88:             cidade VARCHAR,
- 89:             telefone VARCHAR,
- 90:             telefone_normalizado VARCHAR,
- 91:             chat_id VARCHAR,
- 92:             status VARCHAR,
- 93:             mensagem VARCHAR,
- 94:             payload VARCHAR,
- 95:             erro VARCHAR,
- 96:             data_envio TIMESTAMP
- 97:         )
- 98:     """)
- 99:     conn.execute("""
-100:         CREATE TABLE IF NOT EXISTS localidades_estados (
-101:             uf VARCHAR PRIMARY KEY,
-102:             nome VARCHAR NOT NULL
-103:         )
-104:     """)
-105:     conn.execute("""
-106:         CREATE TABLE IF NOT EXISTS localidades_municipios (
-107:             id_municipio BIGINT PRIMARY KEY,
-108:             nome VARCHAR NOT NULL,
-109:             uf VARCHAR NOT NULL,
-110:             bairros_fonte VARCHAR,
-111:             bairros_atualizado_em TIMESTAMP
-112:         )
-113:     """)
-114:     conn.execute("""
-115:         CREATE TABLE IF NOT EXISTS localidades_bairros (
-116:             id_municipio BIGINT NOT NULL,
-117:             nome VARCHAR NOT NULL,
-118:             id_distrito BIGINT,
-119:             PRIMARY KEY (id_municipio, nome)
-120:         )
-121:     """)
-122:     conn.execute("""
-123:         CREATE TABLE IF NOT EXISTS coleta_progresso (
-124:             nicho VARCHAR NOT NULL,
-125:             uf VARCHAR NOT NULL,
-126:             cidade VARCHAR NOT NULL,
-127:             status VARCHAR NOT NULL DEFAULT 'pendente',
-128:             termos_total INTEGER,
-129:             leads_total INTEGER,
-130:             tentativas INTEGER DEFAULT 0,
-131:             erro VARCHAR,
-132:             iniciado_em TIMESTAMP,
-133:             atualizado_em TIMESTAMP,
-134:             concluido_em TIMESTAMP,
-135:             PRIMARY KEY (nicho, uf, cidade)
-136:         )
-137:     """)
-138: 
-139:     # Seed com id fixo (o templates no DuckDB não tem auto-incremento).
-140:     conn.execute("""
-141:         INSERT INTO templates_whatsapp (id, mensagem, descricao, segmento, ativo)
-142:         SELECT 1, ?, 'Apresentação Agendamento Já', ?, TRUE
-143:         WHERE NOT EXISTS (SELECT 1 FROM templates_whatsapp WHERE id = 1)
-144:     """, [TEMPLATE_AGRUPAMENTO_PADRAO, TEMPLATE_SEGMENTO_PADRAO])
-145: 
-146: 
-147: def _schema_postgres(conn):
-148:     """Schema do PostgreSQL (ids identity; migração da tabela `leads`)."""
-149:     from psycopg2 import sql
-150: 
-151:     cur = conn.cursor()
-152:     cur.execute("CREATE SEQUENCE IF NOT EXISTS seq_leads_id")
-153: 
-154:     cur.execute("""
-155:         CREATE TABLE IF NOT EXISTS leads (
-156:             lead_id INTEGER NOT NULL DEFAULT nextval('seq_leads_id'),
-157:             nome TEXT,
-158:             telefone TEXT,
-159:             tipo_telefone TEXT,
-160:             whatsapp_link TEXT,
-161:             instagram TEXT,
-162:             site TEXT,
-163:             bairro TEXT,
-164:             cidade TEXT,
-165:             estado TEXT,
-166:             nicho TEXT,
-167:             status TEXT DEFAULT 'ativo',
-168:             data_extracao TIMESTAMP,
-169:             data_envio_whatsapp TIMESTAMP,
-170:             status_whatsapp TEXT DEFAULT 'pendente',
-171:             chat_id_waha TEXT,
-172:             PRIMARY KEY (lead_id),
-173:             UNIQUE (nome, cidade)
-174:         )
-175:     """)
-176:     cur.execute("""
-177:         CREATE TABLE IF NOT EXISTS templates_whatsapp (
-178:             id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-179:             mensagem TEXT,
-180:             descricao TEXT,
-181:             segmento TEXT,
-182:             ativo BOOLEAN DEFAULT TRUE
-183:         )
-184:     """)
-185:     cur.execute("""
-186:         CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
-187:             id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-188:             lead_id INTEGER,
-189:             nome TEXT,
-190:             cidade TEXT,
-191:             telefone TEXT,
-192:             telefone_normalizado TEXT,
-193:             chat_id TEXT,
-194:             status TEXT,
-195:             mensagem TEXT,
-196:             payload TEXT,
-197:             erro TEXT,
-198:             data_envio TIMESTAMP
-199:         )
-200:     """)
-201:     cur.execute("""
-202:         CREATE TABLE IF NOT EXISTS localidades_estados (
-203:             uf TEXT PRIMARY KEY,
-204:             nome TEXT NOT NULL
-205:         )
-206:     """)
-207:     cur.execute("""
-208:         CREATE TABLE IF NOT EXISTS localidades_municipios (
-209:             id_municipio BIGINT PRIMARY KEY,
-210:             nome TEXT NOT NULL,
-211:             uf TEXT NOT NULL,
-212:             bairros_fonte TEXT,
-213:             bairros_atualizado_em TIMESTAMP
-214:         )
-215:     """)
-216:     cur.execute("""
-217:         CREATE TABLE IF NOT EXISTS localidades_bairros (
-218:             id_municipio BIGINT NOT NULL,
-219:             nome TEXT NOT NULL,
-220:             id_distrito BIGINT,
-221:             PRIMARY KEY (id_municipio, nome)
-222:         )
-223:     """)
-224:     cur.execute("""
-225:         CREATE TABLE IF NOT EXISTS coleta_progresso (
-226:             nicho TEXT NOT NULL,
-227:             uf TEXT NOT NULL,
-228:             cidade TEXT NOT NULL,
-229:             status TEXT NOT NULL DEFAULT 'pendente',
-230:             termos_total INTEGER,
-231:             leads_total INTEGER,
-232:             tentativas INTEGER DEFAULT 0,
-233:             erro TEXT,
-234:             iniciado_em TIMESTAMP,
-235:             atualizado_em TIMESTAMP,
-236:             concluido_em TIMESTAMP,
-237:             PRIMARY KEY (nicho, uf, cidade)
-238:         )
-239:     """)
-240: 
-241:     # Migração do gap conhecido: leads sem PK/default no lead_id (banco antigo).
-242:     cur.execute("ALTER TABLE leads ALTER COLUMN lead_id SET DEFAULT nextval('seq_leads_id')")
-243: 
-244:     cur.execute("""
-245:         SELECT 1 FROM information_schema.table_constraints
-246:         WHERE table_schema = 'public' AND table_name = 'leads'
-247:           AND constraint_name = 'leads_pkey'
-248:     """)
-249:     if not cur.fetchone():
-250:         cur.execute("ALTER TABLE leads ADD CONSTRAINT leads_pkey PRIMARY KEY (lead_id)")
-251: 
-252:     cur.execute("""
-253:         SELECT 1 FROM information_schema.table_constraints
-254:         WHERE table_schema = 'public' AND table_name = 'leads'
-255:           AND constraint_name = 'leads_nome_cidade_key'
-256:     """)
-257:     if not cur.fetchone():
-258:         cur.execute("ALTER TABLE leads ADD CONSTRAINT leads_nome_cidade_key UNIQUE (nome, cidade)")
-259: 
-260:     cur.execute("""
-261:         SELECT setval('seq_leads_id',
-262:             GREATEST((SELECT COALESCE(MAX(lead_id), 0) + 1 FROM leads), 1), false)
-263:     """)
-264: 
-265:     # Seed sem informar id (coluna IDENTITY gera sozinha).
-266:     cur.execute("""
-267:         INSERT INTO templates_whatsapp (mensagem, descricao, segmento, ativo)
-268:         SELECT %s, 'Apresentação Agendamento Já', %s, TRUE
-269:         WHERE NOT EXISTS (SELECT 1 FROM templates_whatsapp)
-270:     """, [TEMPLATE_AGRUPAMENTO_PADRAO, TEMPLATE_SEGMENTO_PADRAO])
-271: 
-272: 
-273: def inicializar_schema(conn):
-274:     """Cria sequences, tabelas, corrige schema antigo e popula os templates."""
-275:     if backend.IS_DUCKDB:
-276:         _schema_duckdb(conn)
-277:     else:
-278:         _schema_postgres(conn)
-279:     backend.commit(conn)
-280: 
-281: 
-282: def main():
-283:     conn = backend.conectar()
-284:     try:
-285:         inicializar_schema(conn)
-286:     finally:
-287:         backend.close(conn)
-288:     print(f"Schema inicializado ({DB_ENGINE}).")
-289: 
-290: 
-291: if __name__ == "__main__":
-292:     main()
-````
-
 ## File: .repomixignore
 ````
  1: # Add patterns to ignore here, one per line
@@ -1250,287 +954,310 @@ requirements.txt
 78: ```
 ````
 
-## File: memory/02-decisoes-e-armadilhas.md
-````markdown
-  1: # 02 — Decisões Técnicas e Armadilhas
-  2: 
-  3: Leia antes de mexer no código. Cada item já custou tempo de depuração.
-  4: 
-  5: ---
-  6: 
-  7: ## Banco: PostgreSQL OU DuckDB (via `src/backend.py`)
-  8: 
-  9: O projeto suporta dois backends, escolhidos por `DB_ENGINE` no `.env`:
+## File: src/schema.py
+````python
+  1: # src/schema.py
+  2: """Criação e população do schema do banco (setup inicial + migração).
+  3: 
+  4: Suporta PostgreSQL e DuckDB (definido por `DB_ENGINE` no `.env`). Separação de
+  5: responsabilidades:
+  6: - `database.py` / `localidades_db.py` apenas CONECTAM e operam sobre um schema
+  7:   já existente.
+  8: - Este módulo CRIA as tabelas/sequences e POPULA os templates. Rode uma vez ao
+  9:   iniciar do zero (ou após mudar de banco):
  10: 
- 11: - `DB_ENGINE=postgres` → banco externo (`DATABASE_URL` ou `DB_*`).
- 12: - `DB_ENGINE=duckdb` → arquivo local (`DUCKDB_PATH`, default `data/leads.duckdb`).
- 13: 
- 14: **Regra de ouro:** nenhum módulo além de `src/backend.py` importa `duckdb` ou
- 15: `psycopg2`. Todo acesso passa por `backend.execute/query_df/query_all/bulk_upsert`.
- 16: - Placeholder de parâmetro: use `backend.ph()` (`?` no DuckDB, `%s` no Postgres),
- 17:   NUNCA hardcode.
- 18: - `excluded.col` funciona no `ON CONFLICT` dos dois bancos.
- 19: - A DDL/seed fica em `schema.py` (roda uma vez: `python src/schema.py`).
- 20: 
- 21: ### Armadilha do DuckDB: um processo por arquivo
+ 11:       python src/schema.py
+ 12: 
+ 13: É idempotente: pode rodar de novo sem perder dados.
+ 14: """
+ 15: import os
+ 16: import sys
+ 17: 
+ 18: sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ 19: 
+ 20: from src import backend
+ 21: from src.config import DB_ENGINE
  22: 
- 23: **O `data/leads.duckdb` só pode ser aberto por UM processo.** Não existe
- 24: "read-only compartilhado" — até `duckdb.connect(..., read_only=True)` falha:
- 25: 
- 26: ```
- 27: IO Error: Cannot open file "...data\leads.duckdb":
- 28: O arquivo já está sendo usado por outro processo.
- 29: ```
- 30: 
- 31: Causas mais comuns: **DBeaver conectado**, scraper rodando, notebook aberto.
- 32: 
- 33: Consequências:
- 34: - `localidades_db` abre/fecha a conexão a cada operação (não mantém aberto).
- 35: - `LeadDatabase` mantém aberto durante o scraping — **não** abra outra conexão
- 36:   persistente no mesmo processo.
- 37: - `CacheIndisponivel` degrada com aviso em vez de quebrar.
- 38: 
- 39: ### Armadilha do PostgreSQL: senha com `@` na URL
+ 23: # Template padrão de WhatsApp, usado para popular a tabela de templates.
+ 24: # Segmento indica o nicho para o qual a mensagem foi criada (ex.: barbearias).
+ 25: # O markdown (**negrito**) é limpo antes do envio real no whatsapp.py.
+ 26: TEMPLATE_AGRUPAMENTO_PADRAO = """Opa, tudo certo?
+ 27: 
+ 28: Conhece o **Agendamento Já**? É uma plataforma 100% online para deixar sua agenda no piloto automático e acabar com a dor de cabeça de gerenciar horários pelo WhatsApp.
+ 29: 
+ 30: Com planos a partir de **R$ 29,90** no nosso aplicativo você consegue:
+ 31: 
+ 32: • Personalizar com a identidade da sua marca
+ 33: • Lembretes automatizados via Whatsapp
+ 34: • Divulgação de horários automatizadas
+ 35: • Controle de faturamento
+ 36: • Pagamentos antecipados
+ 37: 
+ 38: **Conheça nossa proposta**: https://agendamentoja.com/
+ 39: **Acompanhe nosso dia a dia**: https://www.instagram.com/agendamentoja_
  40: 
- 41: Na `DATABASE_URL`, caracteres especiais da senha devem ser "percent-encoded"
- 42: (`@` → `%40`, `:` → `%3A`, `/` → `%2F`). O `config.py` já decodifica com `unquote`.
- 43: Ex.: `aojbfoeub@@@111` → `aojbfoeub%40%40%40111`.
- 44: 
- 45: ### Armadilha: identidade vs sequence (PostgreSQL)
+ 41: Quer ver uma demonstração rápida de como funciona na prática para o seu tipo de serviço? É só me avisar!"""
+ 42: 
+ 43: # Segmento (nicho) padrão do template acima.
+ 44: TEMPLATE_SEGMENTO_PADRAO = "barbearias"
+ 45: 
  46: 
- 47: No Postgres, `templates_whatsapp.id`, `whatsapp_envios_log.id` e
- 48: `localidades_bairros.id` são colunas **IDENTITY**. O `lead_id` de `leads` é
- 49: `integer` com sequence manual (`seq_leads_id`). Não assuma que todas as PKs se
- 50: comportam igual.
+ 47: def _schema_duckdb(conn):
+ 48:     """Schema do DuckDB local (ids via sequences; templates com id fixo)."""
+ 49:     conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_leads_id")
+ 50:     conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_whatsapp_envios_log_id")
  51: 
- 52: ---
- 53: 
- 54: ## IBGE: não existe bairro na API de Localidades
- 55: 
- 56: A API retorna **estados, municípios, distritos e subdistritos**. Nada de bairro.
- 57: 
- 58: - `distritos` são divisões administrativas; em muitos municípios resumem-se à
- 59:   própria sede (mesmo nome da cidade).
- 60: - Exemplo real: **Canoas-RS = 1 distrito ("Canoas") e 0 subdistritos**.
- 61: - `obter_bairros` descarta o distrito-sede; se sobrarem `< MIN_BAIRROS`,
- 62:   complementa com OpenStreetMap.
- 63: - Cobertura: ~643 de 5.571 municípios têm distritos suficientes para dispensar OSM.
- 64: 
- 65: **Não "conserte" isso achando que é bug.** Para bairros oficiais existiria o
- 66: CNEFE 2022 (`ftp.ibge.gov.br/.../Censo_Demografico_2022/Arquivos_CNEFE/CSV/UF/`,
- 67: coluna `DSC_LOCALIDADE`, ex. `43_RS.zip` ≈ 236 MB) — **decisão do mantenedor:
- 68: não implementar por ora**, evoluir aos poucos.
- 69: 
- 70: ---
- 71: 
- 72: ## OpenStreetMap: instável por natureza
- 73: 
- 74: Os espelhos do Overpass e o Nominatim respondem `502`, `400` e `ReadTimeout`
- 75: com frequência. Regra de ouro:
- 76: 
- 77: > Falha de rede **não** significa "cidade sem bairros".
- 78: 
- 79: Por isso `_consultar_overpass` retorna `None` (serviço fora) em vez de
- 80: `{"elements": []}`, e `_descobrir_bairros` devolve `fonte=None` para **não
- 81: gravar** nada. A próxima execução tenta de novo. Se gravasse "cidade", o cache
- 82: ficaria envenenado para sempre.
- 83: 
- 84: ---
- 85: 
- 86: ## Cache: `bairros_fonte` precisa vir na leitura
- 87: 
- 88: Bug corrigido em 2026-10-29: `ler_municipios()` selecionava só
- 89: `id_municipio, nome`, então `_resolver_municipio` devolvia `bairros_fonte=None` e
- 90: `obter_bairros` **ia à API mesmo com cache quente**. Agora a query inclui
- 91: `uf` e `bairros_fonte`.
- 92: 
- 93: **Ao criar novas leituras de município, sempre inclua `bairros_fonte`.**
- 94: 
- 95: ---
- 96: 
- 97: ## Semântica de escrita (não inverter!)
- 98: 
- 99: | Função | Comportamento |
-100: |---|---|
-101: | `salvar_bairros` | **autoritativo** por cidade: remove nomes ausentes **daquela** cidade |
-102: | `salvar_distritos_bulk` | **aditivo**: nunca apaga bairros do OSM |
-103: | `salvar_municipios` | UPSERT — **preserva** `bairros_fonte`/`bairros_atualizado_em` |
-104: 
-105: Se `salvar_distritos_bulk` virasse autoritativo, destruiria as listas do
-106: OpenStreetMap em toda sincronização.
-107: 
-108: ---
-109: 
-110: ## Flags `LOCALIDADES_*` são independentes
-111: 
-112: `USAR_CACHE` controla **leitura**; `SALVAR` controla **escrita**.
-113: 
-114: | USAR_CACHE | SALVAR | Efeito |
-115: |---|---|---|
-116: | true | true | padrão: lê do banco, grava o que faltar |
-117: | false | true | ignora o banco, sempre API e regrava |
-118: | true | false | lê do banco; o que falta vem da API sem gravar |
-119: | false | false | sempre API, banco intocado |
-120: 
-121: - `SALVAR=false` também desativa a escrita local e os menus **3** e **4**.
-122: - As flags são lidas **no import**: mudar o `.env` exige reiniciar o programa.
-123: - Com `USAR_CACHE=false`, cada cidade baixa a lista da UF de novo (exceto pela
-124:   memoização em memória `_municipios_da_uf`, válida só na execução atual).
-125: 
-126: ---
-127: 
-128: ## Cuidados ao editar arquivos (Windows/PowerShell)
-129: 
-130: - **Nunca** use `Get-Content ... -replace ... | Set-Content` para editar `.py`:
-131:   ele reescreve em ANSI e **corrompe acentuação** (dupla codificação / mojibake).
-132:   Use o editor (edit) ou grave via Python com `encoding="utf-8"`.
-133: - Grave sempre **UTF-8 sem BOM** (BOM quebra a primeira chave do `.env`).
-134: - Para testar, use o interpretador da venv: `venv\Scripts\python.exe`.
-135:   O `python` global do mantenedor é 3.15 e pode não ter as dependências.
-136: - Valide a acentuação após edições em lote: procure caracteres de dupla
-137:   codificação (por exemplo, `A` com til U+00C3 seguido de símbolo de moeda).
-138: 
-139: ---
-140: 
-141: ## WAHA: chatId `@c.us` vs `@lid` (HTTP 500)
-142: 
-143: Enviar `POST /api/sendText` com `chatId = 55DDDNUMERO@c.us` **falha com HTTP 500**
-144: para números recentes do WhatsApp. Esses números foram migrados para o formato
-145: **`@lid`** (hidden user ID).
-146: 
-147: - Diagnóstico: `GET /api/checkNumberStatus?session=default&phone=55DDD9XXXXXXXX`
-148:   responde `{"numberExists": true, "chatId": "143172869029943@lid"}`.
-149: - Correção: **sempre resolver o chatId via `checkNumberStatus` antes de enviar**,
-150:   em vez de montar `@c.us` na mão (é o que a documentação da WAHA recomenda para
-151:   números brasileiros).
-152: - O chatId resolvido é **cacheado** na coluna `leads.chat_id_waha` — a consulta
-153:   extra só acontece uma vez por lead.
-154: - ⚠️ O payload do `sendText` está correto (`{session, chatId, text}` + header
-155:   `X-Api-Key`); o erro 500 era **só** o formato do `chatId`, não o endpoint.
-156: 
-157: ---
+ 52:     conn.execute("""
+ 53:         CREATE TABLE IF NOT EXISTS leads (
+ 54:             lead_id INTEGER DEFAULT nextval('seq_leads_id'),
+ 55:             nome VARCHAR,
+ 56:             telefone VARCHAR,
+ 57:             tipo_telefone VARCHAR,
+ 58:             whatsapp_link VARCHAR,
+ 59:             instagram VARCHAR,
+ 60:             site VARCHAR,
+ 61:             bairro VARCHAR,
+ 62:             cidade VARCHAR,
+ 63:             estado VARCHAR,
+ 64:             nicho VARCHAR,
+ 65:             status VARCHAR DEFAULT 'ativo',
+ 66:             data_extracao TIMESTAMP,
+ 67:             data_envio_whatsapp TIMESTAMP,
+ 68:             status_whatsapp VARCHAR DEFAULT 'pendente',
+ 69:             chat_id_waha VARCHAR,
+ 70:             PRIMARY KEY (lead_id),
+ 71:             UNIQUE (nome, cidade)
+ 72:         )
+ 73:     """)
+ 74:     conn.execute("""
+ 75:         CREATE TABLE IF NOT EXISTS templates_whatsapp (
+ 76:             id INTEGER PRIMARY KEY,
+ 77:             mensagem VARCHAR,
+ 78:             descricao VARCHAR,
+ 79:             segmento VARCHAR,
+ 80:             ativo BOOLEAN DEFAULT TRUE
+ 81:         )
+ 82:     """)
+ 83:     conn.execute("""
+ 84:         CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
+ 85:             id INTEGER DEFAULT nextval('seq_whatsapp_envios_log_id'),
+ 86:             lead_id INTEGER,
+ 87:             nome VARCHAR,
+ 88:             cidade VARCHAR,
+ 89:             telefone VARCHAR,
+ 90:             telefone_normalizado VARCHAR,
+ 91:             chat_id VARCHAR,
+ 92:             status VARCHAR,
+ 93:             mensagem VARCHAR,
+ 94:             payload VARCHAR,
+ 95:             erro VARCHAR,
+ 96:             data_envio TIMESTAMP
+ 97:         )
+ 98:     """)
+ 99:     # Contagem do teto diário de envios filtra por data_envio.
+100:     conn.execute("""
+101:         CREATE INDEX IF NOT EXISTS idx_whatsapp_envios_log_data
+102:         ON whatsapp_envios_log (data_envio)
+103:     """)
+104:     conn.execute("""
+105:         CREATE TABLE IF NOT EXISTS localidades_estados (
+106:             uf VARCHAR PRIMARY KEY,
+107:             nome VARCHAR NOT NULL
+108:         )
+109:     """)
+110:     conn.execute("""
+111:         CREATE TABLE IF NOT EXISTS localidades_municipios (
+112:             id_municipio BIGINT PRIMARY KEY,
+113:             nome VARCHAR NOT NULL,
+114:             uf VARCHAR NOT NULL,
+115:             bairros_fonte VARCHAR,
+116:             bairros_atualizado_em TIMESTAMP
+117:         )
+118:     """)
+119:     conn.execute("""
+120:         CREATE TABLE IF NOT EXISTS localidades_bairros (
+121:             id_municipio BIGINT NOT NULL,
+122:             nome VARCHAR NOT NULL,
+123:             id_distrito BIGINT,
+124:             PRIMARY KEY (id_municipio, nome)
+125:         )
+126:     """)
+127:     conn.execute("""
+128:         CREATE TABLE IF NOT EXISTS coleta_progresso (
+129:             nicho VARCHAR NOT NULL,
+130:             uf VARCHAR NOT NULL,
+131:             cidade VARCHAR NOT NULL,
+132:             status VARCHAR NOT NULL DEFAULT 'pendente',
+133:             termos_total INTEGER,
+134:             leads_total INTEGER,
+135:             tentativas INTEGER DEFAULT 0,
+136:             erro VARCHAR,
+137:             iniciado_em TIMESTAMP,
+138:             atualizado_em TIMESTAMP,
+139:             concluido_em TIMESTAMP,
+140:             PRIMARY KEY (nicho, uf, cidade)
+141:         )
+142:     """)
+143: 
+144:     # Seed com id fixo (o templates no DuckDB não tem auto-incremento).
+145:     conn.execute("""
+146:         INSERT INTO templates_whatsapp (id, mensagem, descricao, segmento, ativo)
+147:         SELECT 1, ?, 'Apresentação Agendamento Já', ?, TRUE
+148:         WHERE NOT EXISTS (SELECT 1 FROM templates_whatsapp WHERE id = 1)
+149:     """, [TEMPLATE_AGRUPAMENTO_PADRAO, TEMPLATE_SEGMENTO_PADRAO])
+150: 
+151: 
+152: def _schema_postgres(conn):
+153:     """Schema do PostgreSQL (ids identity; migração da tabela `leads`)."""
+154:     from psycopg2 import sql
+155: 
+156:     cur = conn.cursor()
+157:     cur.execute("CREATE SEQUENCE IF NOT EXISTS seq_leads_id")
 158: 
-159: ## WAHA: cadência aleatória (anti-bloqueio)
-160: 
-161: Enviar com pausa fixa (ex.: 15s, 15s, 15s) é fácil de detectar e leva a bloqueio.
-162: 
-163: - `WAHA_CADENCIA="X:Y"` (ex.: `3:60` = 3 envios/minuto) faz os envios caírem em
-164:   **pontos aleatórios** dentro de cada janela de Y segundos → pausas variáveis.
-165: - Tem prioridade sobre `WAHA_INTERVALO` (pausa fixa, usada só se `WAHA_CADENCIA`
-166:   estiver vazio).
-167: - Implementação: `_pausas_cadencia(total, envios_janela, janela)` em `whatsapp.py`.
-168: 
-169: ---
-170: 
-171: ## `.env` e Git
-172: 
-173: - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.
-174: - Formato: `CHAVE=VALOR`. Comentários só em **linha própria** — comentário na
-175:   mesma linha vira parte do valor (`WAHA_LIMITE= # vazio` → `" # vazio"`).
-176: - Não use `export`/aspas desnecessárias; o loader tira aspas simples/duplas.
-177: - Nunca imprima nem comite segredos.
-178: 
-179: ---
-180: 
-181: ## Scraping: seletores frágeis
-182: 
-183: Dependem do DOM do Google Maps (podem mudar sem aviso):
-184: 
-185: | Dado | Seletor |
-186: |---|---|
-187: | lista de resultados | `div[role="feed"]` |
-188: | links de perfis | `a[href*="/maps/place/"]` |
-189: | nome | `h1` (ignora "Resultados" e vazio) |
-190: | endereço | `button[data-item-id="address"]` (`aria-label`) |
-191: | telefone | `button[data-item-id^="phone:tel:"]` (`aria-label`) |
-192: | site | `a[data-item-id="authority"]` |
-193: | Instagram | primeiro `a[href]` contendo `instagram.com` |
-194: 
-195: Bairro é extraído do endereço: `"Rua X, 123 - Bairro, Cidade - UF"` → parte
-196: entre `" - "` e `","`. Se não casar, `"Não Informado"`.
-197: 
-198: ---
-199: 
-200: ## Concorrência
-201: 
-202: - O runner usa uma fila (`queue.Queue`) + N threads trabalhadoras
-203:   (`SCRAPER_THREADS`). Cada worker tem seu próprio Chromium (thread-local,
-204:   criado e fechado na mesma thread) e reusa entre as áreas da cidade.
-205: - Os workers **não** escrevem no banco: devolvem o resultado por outra fila e o
-206:   `save_callback` roda na thread principal, mantendo uma única conexão.
-207: - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
-208: - `vistos`/`todos_leads` são tocados só pela thread principal (não precisa de
-209:   lock).
-210: 
-211: ---
-212: 
-213: ## Retomada da coleta (`coleta_progresso`)
-214: 
-215: - A fonte da verdade do "onde parou" é a tabela `coleta_progresso`
-216:   (`nicho, uf, cidade`) — **não** o `leads`, que não sabe se a cidade terminou.
-217: - Só `status='concluida'` é pulado. `em_andamento` (container morto no meio),
-218:   `parcial` (captcha/timeout em alguma área) e `erro` voltam para a fila no
-219:   próximo ciclo.
-220: - `RECAPTURA_DIAS=30` faz a cidade concluída voltar depois de 30 dias;
-221:   `0` = nunca refazer.
-222: - `SEMEAR_PROGRESSO=true` só roda quando a tabela está vazia e usa
-223:   `ON CONFLICT DO NOTHING`: nunca sobrescreve progresso real.
-224: - `RETOMAR_COLETA=false` restaura o comportamento antigo (refaz tudo a cada
-225:   ciclo) — útil para um "passe" completo de atualização.
-226: 
-227: ### Limite do seed a partir de `leads`
-228: 
-229: `semear_progresso_de_leads` enxerga só cidades que **têm** lead. Cidade
-230: coletada que voltou vazia (comum em município pequeno) não aparece em `leads`,
-231: então é recolhida uma vez depois do restart — barato e sem duplicar.
-232: 
-233: ### Criar a tabela manualmente (PostgreSQL)
-234: 
-235: A tabela é criada sozinha na primeira gravação (`_garantir_tabela_progresso`)
-236: e também por `python src/schema.py`. Se precisar criar na mão:
-237: 
-238: ```sql
-239: CREATE TABLE IF NOT EXISTS coleta_progresso (
-240:     nicho TEXT NOT NULL,
-241:     uf TEXT NOT NULL,
-242:     cidade TEXT NOT NULL,
-243:     status TEXT NOT NULL DEFAULT 'pendente',
-244:     termos_total INTEGER,
-245:     leads_total INTEGER,
-246:     tentativas INTEGER DEFAULT 0,
-247:     erro TEXT,
-248:     iniciado_em TIMESTAMP,
-249:     atualizado_em TIMESTAMP,
-250:     concluido_em TIMESTAMP,
-251:     PRIMARY KEY (nicho, uf, cidade)
-252: );
-253: ```
-254: 
-255: Panorama:
-256: 
-257: ```sql
-258: SELECT uf, status, COUNT(*)
-259: FROM coleta_progresso
-260: GROUP BY uf, status ORDER BY uf, status;
-261: ```
-262: 
-263: ## CPU: o gargalo é o Chromium, não o Python
-264: 
-265: - `image`/`media`/`font` bloqueados (`BLOQUEAR_RECURSOS`) e flags de render
-266:   reduzem bastante o uso de CPU; a extração continua igual (DOM).
-267: - Escalar `SCRAPER_THREADS` acima de 3 não acelera: esbarra no
-268:   `_marcar_bloqueio_global` do Google. Em máquina pequena, 1–2 threads.
-269: - Se a CPU continuar em 100%, o próximo passo é limitar o container
-270:   (`cpus: 1.5` no compose) — não adianta reduzir sleep, que não consome CPU.
-271: 
-272: ---
-273: 
-274: ## Coisas que parecem bug mas não são
-275: 
-276: - `"IBGE não publica bairros para X"` → cidade com 1 distrito (ver acima).
-277: - `"Base local ... sem bairros (fonte: cidade)"` → já tentou, o OSM não tinha nada.
-278: - `"LOCALIDADES_SALVAR=false: a base local não será alterada"` → modo leitura.
-279: - `"Aviso: base local ... indisponível (arquivo em uso)"` → feche o DBeaver.
+159:     cur.execute("""
+160:         CREATE TABLE IF NOT EXISTS leads (
+161:             lead_id INTEGER NOT NULL DEFAULT nextval('seq_leads_id'),
+162:             nome TEXT,
+163:             telefone TEXT,
+164:             tipo_telefone TEXT,
+165:             whatsapp_link TEXT,
+166:             instagram TEXT,
+167:             site TEXT,
+168:             bairro TEXT,
+169:             cidade TEXT,
+170:             estado TEXT,
+171:             nicho TEXT,
+172:             status TEXT DEFAULT 'ativo',
+173:             data_extracao TIMESTAMP,
+174:             data_envio_whatsapp TIMESTAMP,
+175:             status_whatsapp TEXT DEFAULT 'pendente',
+176:             chat_id_waha TEXT,
+177:             PRIMARY KEY (lead_id),
+178:             UNIQUE (nome, cidade)
+179:         )
+180:     """)
+181:     cur.execute("""
+182:         CREATE TABLE IF NOT EXISTS templates_whatsapp (
+183:             id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+184:             mensagem TEXT,
+185:             descricao TEXT,
+186:             segmento TEXT,
+187:             ativo BOOLEAN DEFAULT TRUE
+188:         )
+189:     """)
+190:     cur.execute("""
+191:         CREATE TABLE IF NOT EXISTS whatsapp_envios_log (
+192:             id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+193:             lead_id INTEGER,
+194:             nome TEXT,
+195:             cidade TEXT,
+196:             telefone TEXT,
+197:             telefone_normalizado TEXT,
+198:             chat_id TEXT,
+199:             status TEXT,
+200:             mensagem TEXT,
+201:             payload TEXT,
+202:             erro TEXT,
+203:             data_envio TIMESTAMP
+204:         )
+205:     """)
+206:     # Contagem do teto diário de envios filtra por data_envio.
+207:     cur.execute("""
+208:         CREATE INDEX IF NOT EXISTS idx_whatsapp_envios_log_data
+209:         ON whatsapp_envios_log (data_envio)
+210:     """)
+211:     cur.execute("""
+212:         CREATE TABLE IF NOT EXISTS localidades_estados (
+213:             uf TEXT PRIMARY KEY,
+214:             nome TEXT NOT NULL
+215:         )
+216:     """)
+217:     cur.execute("""
+218:         CREATE TABLE IF NOT EXISTS localidades_municipios (
+219:             id_municipio BIGINT PRIMARY KEY,
+220:             nome TEXT NOT NULL,
+221:             uf TEXT NOT NULL,
+222:             bairros_fonte TEXT,
+223:             bairros_atualizado_em TIMESTAMP
+224:         )
+225:     """)
+226:     cur.execute("""
+227:         CREATE TABLE IF NOT EXISTS localidades_bairros (
+228:             id_municipio BIGINT NOT NULL,
+229:             nome TEXT NOT NULL,
+230:             id_distrito BIGINT,
+231:             PRIMARY KEY (id_municipio, nome)
+232:         )
+233:     """)
+234:     cur.execute("""
+235:         CREATE TABLE IF NOT EXISTS coleta_progresso (
+236:             nicho TEXT NOT NULL,
+237:             uf TEXT NOT NULL,
+238:             cidade TEXT NOT NULL,
+239:             status TEXT NOT NULL DEFAULT 'pendente',
+240:             termos_total INTEGER,
+241:             leads_total INTEGER,
+242:             tentativas INTEGER DEFAULT 0,
+243:             erro TEXT,
+244:             iniciado_em TIMESTAMP,
+245:             atualizado_em TIMESTAMP,
+246:             concluido_em TIMESTAMP,
+247:             PRIMARY KEY (nicho, uf, cidade)
+248:         )
+249:     """)
+250: 
+251:     # Migração do gap conhecido: leads sem PK/default no lead_id (banco antigo).
+252:     cur.execute("ALTER TABLE leads ALTER COLUMN lead_id SET DEFAULT nextval('seq_leads_id')")
+253: 
+254:     cur.execute("""
+255:         SELECT 1 FROM information_schema.table_constraints
+256:         WHERE table_schema = 'public' AND table_name = 'leads'
+257:           AND constraint_name = 'leads_pkey'
+258:     """)
+259:     if not cur.fetchone():
+260:         cur.execute("ALTER TABLE leads ADD CONSTRAINT leads_pkey PRIMARY KEY (lead_id)")
+261: 
+262:     cur.execute("""
+263:         SELECT 1 FROM information_schema.table_constraints
+264:         WHERE table_schema = 'public' AND table_name = 'leads'
+265:           AND constraint_name = 'leads_nome_cidade_key'
+266:     """)
+267:     if not cur.fetchone():
+268:         cur.execute("ALTER TABLE leads ADD CONSTRAINT leads_nome_cidade_key UNIQUE (nome, cidade)")
+269: 
+270:     cur.execute("""
+271:         SELECT setval('seq_leads_id',
+272:             GREATEST((SELECT COALESCE(MAX(lead_id), 0) + 1 FROM leads), 1), false)
+273:     """)
+274: 
+275:     # Seed sem informar id (coluna IDENTITY gera sozinha).
+276:     cur.execute("""
+277:         INSERT INTO templates_whatsapp (mensagem, descricao, segmento, ativo)
+278:         SELECT %s, 'Apresentação Agendamento Já', %s, TRUE
+279:         WHERE NOT EXISTS (SELECT 1 FROM templates_whatsapp)
+280:     """, [TEMPLATE_AGRUPAMENTO_PADRAO, TEMPLATE_SEGMENTO_PADRAO])
+281: 
+282: 
+283: def inicializar_schema(conn):
+284:     """Cria sequences, tabelas, corrige schema antigo e popula os templates."""
+285:     if backend.IS_DUCKDB:
+286:         _schema_duckdb(conn)
+287:     else:
+288:         _schema_postgres(conn)
+289:     backend.commit(conn)
+290: 
+291: 
+292: def main():
+293:     conn = backend.conectar()
+294:     try:
+295:         inicializar_schema(conn)
+296:     finally:
+297:         backend.close(conn)
+298:     print(f"Schema inicializado ({DB_ENGINE}).")
+299: 
+300: 
+301: if __name__ == "__main__":
+302:     main()
 ````
 
 ## File: src/localidades_db.py
@@ -1774,6 +1501,319 @@ requirements.txt
 237:         "bairros": bairros,
 238:         "cidades_prontas": prontas,
 239:     }
+````
+
+## File: memory/02-decisoes-e-armadilhas.md
+````markdown
+  1: # 02 — Decisões Técnicas e Armadilhas
+  2: 
+  3: Leia antes de mexer no código. Cada item já custou tempo de depuração.
+  4: 
+  5: ---
+  6: 
+  7: ## Banco: PostgreSQL OU DuckDB (via `src/backend.py`)
+  8: 
+  9: O projeto suporta dois backends, escolhidos por `DB_ENGINE` no `.env`:
+ 10: 
+ 11: - `DB_ENGINE=postgres` → banco externo (`DATABASE_URL` ou `DB_*`).
+ 12: - `DB_ENGINE=duckdb` → arquivo local (`DUCKDB_PATH`, default `data/leads.duckdb`).
+ 13: 
+ 14: **Regra de ouro:** nenhum módulo além de `src/backend.py` importa `duckdb` ou
+ 15: `psycopg2`. Todo acesso passa por `backend.execute/query_df/query_all/bulk_upsert`.
+ 16: - Placeholder de parâmetro: use `backend.ph()` (`?` no DuckDB, `%s` no Postgres),
+ 17:   NUNCA hardcode.
+ 18: - `excluded.col` funciona no `ON CONFLICT` dos dois bancos.
+ 19: - A DDL/seed fica em `schema.py` (roda uma vez: `python src/schema.py`).
+ 20: 
+ 21: ### Armadilha do DuckDB: um processo por arquivo
+ 22: 
+ 23: **O `data/leads.duckdb` só pode ser aberto por UM processo.** Não existe
+ 24: "read-only compartilhado" — até `duckdb.connect(..., read_only=True)` falha:
+ 25: 
+ 26: ```
+ 27: IO Error: Cannot open file "...data\leads.duckdb":
+ 28: O arquivo já está sendo usado por outro processo.
+ 29: ```
+ 30: 
+ 31: Causas mais comuns: **DBeaver conectado**, scraper rodando, notebook aberto.
+ 32: 
+ 33: Consequências:
+ 34: - `localidades_db` abre/fecha a conexão a cada operação (não mantém aberto).
+ 35: - `LeadDatabase` mantém aberto durante o scraping — **não** abra outra conexão
+ 36:   persistente no mesmo processo.
+ 37: - `CacheIndisponivel` degrada com aviso em vez de quebrar.
+ 38: 
+ 39: ### Armadilha do PostgreSQL: senha com `@` na URL
+ 40: 
+ 41: Na `DATABASE_URL`, caracteres especiais da senha devem ser "percent-encoded"
+ 42: (`@` → `%40`, `:` → `%3A`, `/` → `%2F`). O `config.py` já decodifica com `unquote`.
+ 43: Ex.: `aojbfoeub@@@111` → `aojbfoeub%40%40%40111`.
+ 44: 
+ 45: ### Armadilha: identidade vs sequence (PostgreSQL)
+ 46: 
+ 47: No Postgres, `templates_whatsapp.id`, `whatsapp_envios_log.id` e
+ 48: `localidades_bairros.id` são colunas **IDENTITY**. O `lead_id` de `leads` é
+ 49: `integer` com sequence manual (`seq_leads_id`). Não assuma que todas as PKs se
+ 50: comportam igual.
+ 51: 
+ 52: ---
+ 53: 
+ 54: ## IBGE: não existe bairro na API de Localidades
+ 55: 
+ 56: A API retorna **estados, municípios, distritos e subdistritos**. Nada de bairro.
+ 57: 
+ 58: - `distritos` são divisões administrativas; em muitos municípios resumem-se à
+ 59:   própria sede (mesmo nome da cidade).
+ 60: - Exemplo real: **Canoas-RS = 1 distrito ("Canoas") e 0 subdistritos**.
+ 61: - `obter_bairros` descarta o distrito-sede; se sobrarem `< MIN_BAIRROS`,
+ 62:   complementa com OpenStreetMap.
+ 63: - Cobertura: ~643 de 5.571 municípios têm distritos suficientes para dispensar OSM.
+ 64: 
+ 65: **Não "conserte" isso achando que é bug.** Para bairros oficiais existiria o
+ 66: CNEFE 2022 (`ftp.ibge.gov.br/.../Censo_Demografico_2022/Arquivos_CNEFE/CSV/UF/`,
+ 67: coluna `DSC_LOCALIDADE`, ex. `43_RS.zip` ≈ 236 MB) — **decisão do mantenedor:
+ 68: não implementar por ora**, evoluir aos poucos.
+ 69: 
+ 70: ---
+ 71: 
+ 72: ## OpenStreetMap: instável por natureza
+ 73: 
+ 74: Os espelhos do Overpass e o Nominatim respondem `502`, `400` e `ReadTimeout`
+ 75: com frequência. Regra de ouro:
+ 76: 
+ 77: > Falha de rede **não** significa "cidade sem bairros".
+ 78: 
+ 79: Por isso `_consultar_overpass` retorna `None` (serviço fora) em vez de
+ 80: `{"elements": []}`, e `_descobrir_bairros` devolve `fonte=None` para **não
+ 81: gravar** nada. A próxima execução tenta de novo. Se gravasse "cidade", o cache
+ 82: ficaria envenenado para sempre.
+ 83: 
+ 84: ---
+ 85: 
+ 86: ## Cache: `bairros_fonte` precisa vir na leitura
+ 87: 
+ 88: Bug corrigido em 2026-10-29: `ler_municipios()` selecionava só
+ 89: `id_municipio, nome`, então `_resolver_municipio` devolvia `bairros_fonte=None` e
+ 90: `obter_bairros` **ia à API mesmo com cache quente**. Agora a query inclui
+ 91: `uf` e `bairros_fonte`.
+ 92: 
+ 93: **Ao criar novas leituras de município, sempre inclua `bairros_fonte`.**
+ 94: 
+ 95: ---
+ 96: 
+ 97: ## Semântica de escrita (não inverter!)
+ 98: 
+ 99: | Função | Comportamento |
+100: |---|---|
+101: | `salvar_bairros` | **autoritativo** por cidade: remove nomes ausentes **daquela** cidade |
+102: | `salvar_distritos_bulk` | **aditivo**: nunca apaga bairros do OSM |
+103: | `salvar_municipios` | UPSERT — **preserva** `bairros_fonte`/`bairros_atualizado_em` |
+104: 
+105: Se `salvar_distritos_bulk` virasse autoritativo, destruiria as listas do
+106: OpenStreetMap em toda sincronização.
+107: 
+108: ---
+109: 
+110: ## Flags `LOCALIDADES_*` são independentes
+111: 
+112: `USAR_CACHE` controla **leitura**; `SALVAR` controla **escrita**.
+113: 
+114: | USAR_CACHE | SALVAR | Efeito |
+115: |---|---|---|
+116: | true | true | padrão: lê do banco, grava o que faltar |
+117: | false | true | ignora o banco, sempre API e regrava |
+118: | true | false | lê do banco; o que falta vem da API sem gravar |
+119: | false | false | sempre API, banco intocado |
+120: 
+121: - `SALVAR=false` também desativa a escrita local e os menus **3** e **4**.
+122: - As flags são lidas **no import**: mudar o `.env` exige reiniciar o programa.
+123: - Com `USAR_CACHE=false`, cada cidade baixa a lista da UF de novo (exceto pela
+124:   memoização em memória `_municipios_da_uf`, válida só na execução atual).
+125: 
+126: ---
+127: 
+128: ## Cuidados ao editar arquivos (Windows/PowerShell)
+129: 
+130: - **Nunca** use `Get-Content ... -replace ... | Set-Content` para editar `.py`:
+131:   ele reescreve em ANSI e **corrompe acentuação** (dupla codificação / mojibake).
+132:   Use o editor (edit) ou grave via Python com `encoding="utf-8"`.
+133: - Grave sempre **UTF-8 sem BOM** (BOM quebra a primeira chave do `.env`).
+134: - Para testar, use o interpretador da venv: `venv\Scripts\python.exe`.
+135:   O `python` global do mantenedor é 3.15 e pode não ter as dependências.
+136: - Valide a acentuação após edições em lote: procure caracteres de dupla
+137:   codificação (por exemplo, `A` com til U+00C3 seguido de símbolo de moeda).
+138: 
+139: ---
+140: 
+141: ## WAHA: chatId `@c.us` vs `@lid` (HTTP 500)
+142: 
+143: Enviar `POST /api/sendText` com `chatId = 55DDDNUMERO@c.us` **falha com HTTP 500**
+144: para números recentes do WhatsApp. Esses números foram migrados para o formato
+145: **`@lid`** (hidden user ID).
+146: 
+147: - Diagnóstico: `GET /api/checkNumberStatus?session=default&phone=55DDD9XXXXXXXX`
+148:   responde `{"numberExists": true, "chatId": "143172869029943@lid"}`.
+149: - Correção: **sempre resolver o chatId via `checkNumberStatus` antes de enviar**,
+150:   em vez de montar `@c.us` na mão (é o que a documentação da WAHA recomenda para
+151:   números brasileiros).
+152: - O chatId resolvido é **cacheado** na coluna `leads.chat_id_waha` — a consulta
+153:   extra só acontece uma vez por lead.
+154: - ⚠️ O payload do `sendText` está correto (`{session, chatId, text}` + header
+155:   `X-Api-Key`); o erro 500 era **só** o formato do `chatId`, não o endpoint.
+156: 
+157: ---
+158: 
+159: ## WAHA: cadência aleatória (anti-bloqueio)
+160: 
+161: Enviar com pausa fixa (ex.: 15s, 15s, 15s) é fácil de detectar e leva a bloqueio.
+162: 
+163: - `WAHA_CADENCIA="X:Y"` (ex.: `3:60` = 3 envios/minuto) faz os envios caírem em
+164:   **pontos aleatórios** dentro de cada janela de Y segundos → pausas variáveis.
+165: - Tem prioridade sobre `WAHA_INTERVALO` (pausa fixa, usada só se `WAHA_CADENCIA`
+166:   estiver vazio).
+167: - Implementação: `_pausas_cadencia(total, envios_janela, janela)` em `whatsapp.py`.
+168: 
+169: ---
+170: 
+171: ## WAHA: limites e janela (coisas diferentes)
+172: 
+173: Confusão comum: achar que `WAHA_LIMITE` é o teto diário. Não é.
+174: 
+175: | Variável | O que faz | Reiniciar zera? |
+176: |---|---|---|
+177: | `WAHA_CADENCIA` (`3:60`) | **ritmo**: 3 por minuto | — |
+178: | `WAHA_JANELA_ENVIO` (`08:00-19:00`) | **horário**: só envia dentro | — |
+179: | `WAHA_LIMITE` (`150`) | **campanha**: máximo por execução | sim |
+180: | `WAHA_LIMITE_DIA` (`150`) | **dia**: soma todas as campanhas | **não** (lê o log) |
+181: 
+182: - O contador do dia vem de `whatsapp_envios_log` (`status='enviado'`) e não da
+183:   memória do processo — por isso reiniciar o programa/container não "libera"
+184:   mais envios.
+185: - O corte do dia é `inicio_da_janela_diaria()`, que devolve a **abertura da
+186:   janela** (08:00 no exemplo). Sem janela, é meia-noite. Comparado com o
+187:   `data_envio` gravado pelo próprio processo: não depende do timezone do banco.
+188: - Envios com `status='falhou'` **não** contam para o teto.
+189: - `disparar_campanha` reconsulta janela e contador **a cada envio**: campanha
+190:   longa que cruza o fim do horário ou a virada do dia para no ponto certo, e
+191:   duas campanhas em paralelo continuam respeitando o teto.
+192: - Janela que atravessa a meia-noite (`22:00-06:00`) é válida: `janela_aberta`
+193:   compara minutos e trata `início > fim` como travessia.
+194: - Janela inválida (ex.: `25:00-19:00`) imprime aviso e vira "sem janela" (24h).
+195:   A escolha é deliberada: não travar a operação por erro de digitação.
+196: - `inicio == fim` (ex.: `08:00-08:00`) também é tratado como 24h, não como
+197:   janela de duração zero.
+198: 
+199: ---
+200: 
+201: ## `.env` e Git
+202: 
+203: - `.env` **é ignorado** (contém `WAHA_API_KEY`). `.env.example` **é versionado**.
+204: - Formato: `CHAVE=VALOR`. Comentários só em **linha própria** — comentário na
+205:   mesma linha vira parte do valor (`WAHA_LIMITE= # vazio` → `" # vazio"`).
+206: - Não use `export`/aspas desnecessárias; o loader tira aspas simples/duplas.
+207: - Nunca imprima nem comite segredos.
+208: 
+209: ---
+210: 
+211: ## Scraping: seletores frágeis
+212: 
+213: Dependem do DOM do Google Maps (podem mudar sem aviso):
+214: 
+215: | Dado | Seletor |
+216: |---|---|
+217: | lista de resultados | `div[role="feed"]` |
+218: | links de perfis | `a[href*="/maps/place/"]` |
+219: | nome | `h1` (ignora "Resultados" e vazio) |
+220: | endereço | `button[data-item-id="address"]` (`aria-label`) |
+221: | telefone | `button[data-item-id^="phone:tel:"]` (`aria-label`) |
+222: | site | `a[data-item-id="authority"]` |
+223: | Instagram | primeiro `a[href]` contendo `instagram.com` |
+224: 
+225: Bairro é extraído do endereço: `"Rua X, 123 - Bairro, Cidade - UF"` → parte
+226: entre `" - "` e `","`. Se não casar, `"Não Informado"`.
+227: 
+228: ---
+229: 
+230: ## Concorrência
+231: 
+232: - O runner usa uma fila (`queue.Queue`) + N threads trabalhadoras
+233:   (`SCRAPER_THREADS`). Cada worker tem seu próprio Chromium (thread-local,
+234:   criado e fechado na mesma thread) e reusa entre as áreas da cidade.
+235: - Os workers **não** escrevem no banco: devolvem o resultado por outra fila e o
+236:   `save_callback` roda na thread principal, mantendo uma única conexão.
+237: - O cooldown anti-captcha usa `_cooldown_lock` + variável global `_cooldown_ate`.
+238: - `vistos`/`todos_leads` são tocados só pela thread principal (não precisa de
+239:   lock).
+240: 
+241: ---
+242: 
+243: ## Retomada da coleta (`coleta_progresso`)
+244: 
+245: - A fonte da verdade do "onde parou" é a tabela `coleta_progresso`
+246:   (`nicho, uf, cidade`) — **não** o `leads`, que não sabe se a cidade terminou.
+247: - Só `status='concluida'` é pulado. `em_andamento` (container morto no meio),
+248:   `parcial` (captcha/timeout em alguma área) e `erro` voltam para a fila no
+249:   próximo ciclo.
+250: - `RECAPTURA_DIAS=30` faz a cidade concluída voltar depois de 30 dias;
+251:   `0` = nunca refazer.
+252: - `SEMEAR_PROGRESSO=true` só roda quando a tabela está vazia e usa
+253:   `ON CONFLICT DO NOTHING`: nunca sobrescreve progresso real.
+254: - `RETOMAR_COLETA=false` restaura o comportamento antigo (refaz tudo a cada
+255:   ciclo) — útil para um "passe" completo de atualização.
+256: 
+257: ### Limite do seed a partir de `leads`
+258: 
+259: `semear_progresso_de_leads` enxerga só cidades que **têm** lead. Cidade
+260: coletada que voltou vazia (comum em município pequeno) não aparece em `leads`,
+261: então é recolhida uma vez depois do restart — barato e sem duplicar.
+262: 
+263: ### Criar a tabela manualmente (PostgreSQL)
+264: 
+265: A tabela é criada sozinha na primeira gravação (`_garantir_tabela_progresso`)
+266: e também por `python src/schema.py`. Se precisar criar na mão:
+267: 
+268: ```sql
+269: CREATE TABLE IF NOT EXISTS coleta_progresso (
+270:     nicho TEXT NOT NULL,
+271:     uf TEXT NOT NULL,
+272:     cidade TEXT NOT NULL,
+273:     status TEXT NOT NULL DEFAULT 'pendente',
+274:     termos_total INTEGER,
+275:     leads_total INTEGER,
+276:     tentativas INTEGER DEFAULT 0,
+277:     erro TEXT,
+278:     iniciado_em TIMESTAMP,
+279:     atualizado_em TIMESTAMP,
+280:     concluido_em TIMESTAMP,
+281:     PRIMARY KEY (nicho, uf, cidade)
+282: );
+283: ```
+284: 
+285: Panorama:
+286: 
+287: ```sql
+288: SELECT uf, status, COUNT(*)
+289: FROM coleta_progresso
+290: GROUP BY uf, status ORDER BY uf, status;
+291: ```
+292: 
+293: ## CPU: o gargalo é o Chromium, não o Python
+294: 
+295: - `image`/`media`/`font` bloqueados (`BLOQUEAR_RECURSOS`) e flags de render
+296:   reduzem bastante o uso de CPU; a extração continua igual (DOM).
+297: - Escalar `SCRAPER_THREADS` acima de 3 não acelera: esbarra no
+298:   `_marcar_bloqueio_global` do Google. Em máquina pequena, 1–2 threads.
+299: - Se a CPU continuar em 100%, o próximo passo é limitar o container
+300:   (`cpus: 1.5` no compose) — não adianta reduzir sleep, que não consome CPU.
+301: 
+302: ---
+303: 
+304: ## Coisas que parecem bug mas não são
+305: 
+306: - `"IBGE não publica bairros para X"` → cidade com 1 distrito (ver acima).
+307: - `"Base local ... sem bairros (fonte: cidade)"` → já tentou, o OSM não tinha nada.
+308: - `"LOCALIDADES_SALVAR=false: a base local não será alterada"` → modo leitura.
+309: - `"Aviso: base local ... indisponível (arquivo em uso)"` → feche o DBeaver.
 ````
 
 ## File: memory/README.md
@@ -2335,273 +2375,6 @@ requirements.txt
 504:         t.join(timeout=30)
 505: 
 506:     return pd.DataFrame(todos_leads)
-````
-
-## File: .gitignore
-````
- 1: # Dados: o banco DuckDB É versionado (data/leads.duckdb).
- 2: # Apenas artefatos transientes do DuckDB e saídas geradas ficam de fora.
- 3: *.duckdb.wal
- 4: *.duckdb.tmp
- 5: *.xlsx
- 6: *.csv
- 7: *.log
- 8: 
- 9: # Segredos e configuração local (contém a API key da WAHA)
-10: .env
-11: 
-12: # Sessões do WhatsApp (WAHA)
-13: sessions/
-14: 
-15: # Ambientes Virtuais
-16: venv/
-17: env/
-18: .venv/
-19: 
-20: # Python Cache
-21: __pycache__/
-22: *.py[cod]
-23: *$py.class
-24: 
-25: # Configurações de IDE
-26: .vscode/
-27: .idea/
-28: 
-29: # Sistema Operacional
-30: .DS_Store
-31: Thumbs.db
-````
-
-## File: memory/03-historico-de-mudancas.md
-````markdown
-  1: # 03 — Histórico de Mudanças
-  2: 
-  3: Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
-  4: 
-  5: ---
-  6: 
-  7: ## 2026-11-02
-  8: 
-  9: ### Retomada de coleta (`coleta_progresso`)
- 10: 
- 11: - Antes: cada ciclo do `coleta_auto.py` percorria **todas** as UFs/cidades do
- 12:   zero. Parar o container no meio de uma coleta nacional significava recomeçar
- 13:   do Acre (os leads já gravados não duplicavam por causa do UPSERT, mas o
- 14:   trabalho era refeito).
- 15: - Nova tabela `coleta_progresso` (`nicho`, `uf`, `cidade` PK; `status`,
- 16:   `termos_total`, `leads_total`, `tentativas`, `erro`, timestamps), criada de
- 17:   forma idempotente pelo `LeadDatabase` na primeira gravação e também no
- 18:   `schema.py`.
- 19: - `LeadDatabase`: `progresso_carregar/iniciar/concluir/parcial/erro` e
- 20:   `semear_progresso_de_leads`.
- 21: - `coleta_auto.py`: `RETOMAR_COLETA=true` (padrão) filtra cidades já
- 22:   concluídas; `RECAPTURA_DIAS` (padrão 30; `0` = nunca refazer) define quando
- 23:   uma cidade concluída volta para a fila.
- 24: - Cidade com área bloqueada (captcha/timeout) fica `parcial` e é tentada de
- 25:   novo no ciclo seguinte — não fica 30 dias marcada como concluída.
- 26: - `SEMEAR_PROGRESSO=true` (padrão): na primeira execução com a tabela vazia,
- 27:   cidades que já têm leads no banco viram `concluida` (retoma uma coleta que
- 28:   rodou antes deste recurso). Nunca sobrescreve progresso existente.
- 29: - Validado nos dois backends: PostgreSQL (produção — tabela criada e semeada com
- 30:   405 cidades, 5.166 restantes das 5.571) e DuckDB (setup novo).
- 31: 
- 32: ### CPU do scraper
- 33: 
- 34: - Navegador reaproveitado por thread: antes cada termo de busca abria um
- 35:   Chromium novo (~30 launches por cidade). Agora cada worker mantém um Chromium
- 36:   e abre só um contexto isolado por termo, reciclando o browser a cada
- 37:   `MAX_CONTEXTOS_POR_NAVEGADOR` (padrão 40) para conter memória.
- 38: - `BLOQUEAR_RECURSOS=true` (padrão) aborta `image`/`media`/`font` — a extração
- 39:   é no DOM, então nada de dados se perde e a CPU cai.
- 40: - Flags do Chromium para reduzir trabalho de renderização/rede.
- 41: - Contagem de perfis na rolagem passou a ser feita em JS (`page.evaluate`) em
- 42:   vez de `query_selector_all` + `get_attribute` por link a cada rolagem.
- 43: - Busca de Instagram usa seletor direto (`a[href*="instagram.com"]`).
- 44: - `SCRAPER_THREADS` (padrão 3) configurável: em VPS pequena, 1 ou 2.
- 45: - Runner passou a usar fila + workers (`queue`) com persistência na thread
- 46:   principal; `estatisticas` informa `areas_total/areas_ok/areas_erro`.
- 47: 
- 48: 
- 49: ## 2026-10-31
- 50: 
- 51: ### Migração para PostgreSQL + suporte dual (PostgreSQL/DuckDB)
- 52: 
- 53: - Banco externo PostgreSQL (`vps.agendamentoja.com/leads_db`) + mantido o DuckDB
- 54:   local como alternativa offline.
- 55: - Novo `src/backend.py`: abstrai conexão, placeholder (`?`/`%s`), leitura
- 56:   (DataFrame/tupla) e bulk upsert entre os dois bancos. `database.py`,
- 57:   `localidades_db.py` e `schema.py` não importam mais `duckdb`/`psycopg2`.
- 58: - `config.py` lê `DB_ENGINE` (postgres|duckdb), `DATABASE_URL` e `DUCKDB_PATH`.
- 59:   Inferência: DUCKDB_PATH → duckdb; senão DATABASE_URL → postgres; senão duckdb.
- 60: - `schema.py` reescrito para os dois bancos; corrige o gap da tabela `leads`
- 61:   (PK `lead_id` + UNIQUE `(nome,cidade)` + default `nextval('seq_leads_id')`).
- 62: - `requirements.txt`: readicionado `duckdb` + `psycopg2-binary`.
- 63: - `.env`: seção "BANCO DE DADOS — engine independente" com `DATABASE_URL` (senha
- 64:   com `@` percent-encoded) e config antiga comentada como referência.
- 65: 
- 66: ### Cadência aleatória de envio WhatsApp (anti-bloqueio)
- 67: 
- 68: - Nova `WAHA_CADENCIA="X:Y"` no `.env` (ex.: `3:60` = 3 envios por minuto).
- 69: - `whatsapp.py`: `_parse_cadencia` + `_pausas_cadencia` distribuem os envios em
- 70:   pontos **aleatórios** dentro de cada janela (pausas variáveis, não fixas).
- 71: - Tem prioridade sobre `WAHA_INTERVALO` (fixo). `WAHA_CADENCIA` vazio → usa o fixo.
- 72: 
- 73: ### Tabela `whatsapp_envios_log` (rastreamento)
- 74: 
- 75: - Log por envio com `lead_id`, `telefone` (dígitos) e `telefone_normalizado`
- 76:   (55DDDNUMERO), `chat_id`, `status`, `mensagem`, `payload`, `erro`, `data_envio`.
- 77: - JOIN pronto por `lead_id` ou `telefone`.
- 78: 
- 79: ---
- 80: 
- 81: ## 2026-10-30
- 82: 
- 83: ### Templates de mensagem de WhatsApp (tabela + markdown)
- 84: 
- 85: - Nova tabela `templates_whatsapp` (`id`, `mensagem`, `descricao`, `ativo`),
- 86:   criada e seedada no `LeadDatabase.__init__` (idempotente, `id=1` =
- 87:   "Apresentação Agendamento Já").
- 88: - `listar_templates_ativos()` retorna só os ativos para o menu de envio.
- 89: - `_limpar_markdown_whatsapp` remove `**negrito**` e converte `[rótulo](url)` em
- 90:   texto plano antes do envio (o template usa markdown; o WhatsApp não renderiza).
- 91: 
- 92: ### Menu de envio: template + filtros + teste
- 93: 
- 94: - `enviar_whatsapp_menu()` agora: escolhe template → aplica filtros → pergunta se
- 95:   quer **teste de envio** → confirma e dispara.
- 96: - Filtros de envio (menu "FILTROS DE ENVIO"): 0 todos / 1 por número / 2 por
- 97:   cidade / 3 por nicho. Número aceita parte e compara só dígitos.
- 98: - `testar_envio()`: digita um número com DDD ou escolhe um lead pendente.
- 99: - `disparar_campanha` passou a aceitar `leads` (DataFrame já filtrado) — sem isso
-100:   os filtros eram ignorados no disparo (ele reconsultava o banco).
-101: 
-102: ### Correção crítica: chatId `@lid` vs `@c.us` (WAHA)
-103: 
-104: - **Sintoma:** `500 Server Error` no `/api/sendText` para o número do mantenedor.
-105: - **Causa:** número recente usa `@lid`; enviar `@c.us` retorna HTTP 500.
-106: - **Correção:** `_resolver_chatid_waha` consulta `/api/checkNumberStatus` e usa o
-107:   chatId retornado; fallback `@c.us` para números antigos.
-108: - **Cache:** coluna `leads.chat_id_waha` + `salvar_chat_id_waha` — a resolução é
-109:   feita uma única vez por lead (menos chamadas e reenvio mais rápido).
-110: - `data_envio_whatsapp` continua gravada só no sucesso; `status_whatsapp` em
-111:   `enviado`/`falhou`.
-112: 
-113: ---
-114: 
-115: ## 2026-10-29
-116: 
-117: ### Memória do projeto para IA
-118: 
-119: - Criada a pasta `memory/` com documentação densa para reduzir custo de contexto.
-120: - Arquivos: `README.md`, `00-resumo-projeto.md`, `01-arquitetura-e-modulos.md`,
-121:   `02-decisoes-e-armadilhas.md`, `03-historico-de-mudancas.md`,
-122:   `04-como-contribuir.md` (padrões de código, logs, config, testes e docs).
-123: - `README.md` limpo: removido o bloco "env temp:" (dump cru do `.env`) e
-124:   adicionadas as seções 12 (memória para IA) e 13 (observação sobre configuração).
-125: 
-126: ### Correção: cache de bairros ignorado (`bairros_fonte`)
-127: 
-128: - **Sintoma:** com `LOCALIDADES_USAR_CACHE=true` e base populada, a coleta ainda
-129:   consultava IBGE e Overpass.
-130: - **Causa:** `localidades_db.ler_municipios()` não retornava `bairros_fonte`;
-131:   `_resolver_municipio` repassava `None`, então o cache nunca era considerado.
-132: - **Correção:** query passou a trazer `uf` e `bairros_fonte`; o resolver repassa
-133:   o valor real.
-134: - **Teste:** com as funções de rede trocadas por `AssertionError`, os bairros de
-135:   Canoas (fonte `overpass`) e Bento Gonçalves (fonte `ibge`) vieram do banco.
-136: 
-137: ### Nome oficial do município (IBGE) na coleta
-138: 
-139: - `obter_municipio(cidade, uf)` confirma o município e devolve `id_municipio`,
-140:   `nome` oficial e `uf`.
-141: - `filtrar_cidades(cidades, termo)` compara **sem acento e sem caixa**:
-142:   `canoas`, `sao leopoldo`, `CHAPECO` funcionam.
-143: - `main.coletar_leads()` passa a usar o nome oficial no scraping, no banco e no
-144:   nome do Excel, e imprime `Município (IBGE): Canoas-RS | código 4304606`.
-145: - Lista de municípios **memoizada** por execução (`_municipios_da_uf`), evitando
-146:   rebaixar a lista da UF a cada cidade (principalmente com `SALVAR=false`).
-147: 
-148: ### Mensagens de bairros mais honestas
-149: 
-150: - Antes: `IBGE retornou 0 distrito(s) útil(eis)`.
-151: - Agora: `IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).`
-152: - Motivo: a API de Localidades do IBGE **não tem bairros** (só distritos).
-153: 
-154: ### Aquecimento de bairros por UF (menu 4)
-155: 
-156: - `locations.aquecer_bairros_uf(uf, cidades=None, max_cidades=0, pausa_segundos=None)`.
-157: - `localidades_db.ler_municipios_pendentes(uf)` → só `bairros_fonte IS NULL`.
-158: - Retoma de onde parou; `Ctrl+C` preserva o que já foi gravado.
-159: - Pausa (`AQUECER_PAUSA_SEGUNDOS`, default 2) só quando a cidade usou o OSM.
-160: - Falha de rede não grava nada (`falhas` no resumo) e a cidade continua pendente.
-161: - Bloqueado quando `LOCALIDADES_SALVAR=false`.
-162: - Medido: AC 21 → 18 → 17 pendentes; SP 621 → 616.
-163: 
-164: ### Flag `LOCALIDADES_SALVAR`
-165: 
-166: - `false` = somente leitura: nenhuma escrita, **nem criação de tabelas**
-167:   (`localidades_db.CRIAR_TABELAS = False`) e menus 3/4 desativados.
-168: - Todas as escritas passam por `_salvar()`, que respeita a flag.
-169: - Aviso único por execução para não poluir o log.
-170: 
-171: ### `.env` e `.env.example` comentados
-172: 
-173: - Cada variável com explicação, faixa de valores e efeito colateral.
-174: - Tabela das 4 combinações `USAR_CACHE × SALVAR`.
-175: - Regra explícita: comentário só em linha própria.
-176: - Valores locais preservados (`USAR_CACHE=false` → depois `true`).
-177: 
-178: ### Base de localidades offline (IBGE) — menu 3
-179: 
-180: - Novo `src/localidades_db.py` com tabelas `localidades_estados`,
-181:   `localidades_municipios`, `localidades_bairros` no mesmo `leads.duckdb`.
-182: - `src/config.py` centraliza o loader do `.env` (antes duplicado no `whatsapp.py`).
-183: - `src/locations.py` reescrito: cache → API → grava.
-184: - Sync nacional: 27 estados, 5.571 municípios, 10.751 distritos; 643 cidades com
-185:   bairros prontos pelo IBGE.
-186: - Fallback OSM por cidade, gravado uma única vez.
-187: 
-188: ### Anti-captcha / bloqueio do Google Maps
-189: 
-190: - Detecção por URL `/sorry/`, seletores de captcha e textos ("tráfego incomum").
-191: - Retry com pausa longa (`CAPTCHA_PAUSA_SEGUNDOS`) e **cooldown global**
-192:   (`CAPTCHA_PAUSA_GLOBAL_SEGUNDOS`) entre todas as threads.
-193: - Bloqueio persistente → aborta a área e **preserva os leads já extraídos**.
-194: - Testado com Playwright real: página normal passa, página de captcha levanta
-195:   `BloqueioDetectado` após `CAPTCHA_MAX_TENTATIVAS`.
-196: 
-197: ### Correção: menu não aparecia
-198: 
-199: - `src/main.py` definia `menu_interativo()` mas **nunca chamava**.
-200: - Adicionado `if __name__ == "__main__": menu_interativo()`.
-201: 
-202: ### Banco DuckDB versionado
-203: 
-204: - `data/leads.duckdb` passou a ser versionado no Git.
-205: - `.gitignore`: removidos `data/` e `*.duckdb` da lista de ignore; adicionados
-206:   `*.duckdb.wal` e `*.duckdb.tmp`.
-207: - `*.xlsx`, `*.csv`, `*.log` continuam ignorados (confirmado com
-208:   `git check-ignore` e `git ls-files`).
-209: - ⚠️ Comitar com o programa aberto sobe o `.duckdb` sem o `.wal` (dados
-210:   desatualizados). Fechar antes.
-211: 
-212: ---
-213: 
-214: ## Pendências / próximos passos
-215: 
-216: | Item | Status |
-217: |---|---|
-218: | Bairros oficiais via CNEFE 2022 | **Não implementar por hora** (decisão do mantenedor) |
-219: | Resolução automática de captcha (2Captcha/CapMonster) | Não implementado; hoje pausa e desiste da área |
-220: | Enriquecimento de e-mail a partir dos sites | Não iniciado |
-221: | Base de bairros offline nacional | Coberto parcialmente pelo IBGE (643 cidades) |
-222: 
-223: ## Problemas conhecidos (ambiente)
-224: 
-225: - **DBeaver aberto trava o DuckDB** → cache cai para as APIs.
-226: - **Overpass/Nominatim instáveis** (502, timeout) → aquecimento por UF precisa de
-227:   paciência e retomadas.
-228: - Interprete global do mantenedor é Python 3.15; **usar `venv\Scripts\python.exe`**.
 ````
 
 ## File: src/locations.py
@@ -3210,331 +2983,268 @@ requirements.txt
 602:     return True
 ````
 
-## File: src/whatsapp.py
-````python
-  1: # src/whatsapp.py
-  2: """Integração com a WAHA (WhatsApp HTTP API) para envio de mensagens aos leads.
-  3: 
-  4: Configuração via variáveis de ambiente:
-  5:     WAHA_API_URL   -> URL base da WAHA (padrão: http://localhost:3000)
-  6:     WAHA_API_KEY   -> chave de API da WAHA (obrigatória se a instância exigir)
-  7:     WAHA_SESSION   -> nome da sessão conectada na WAHA (padrão: "default")
+## File: memory/03-historico-de-mudancas.md
+````markdown
+  1: # 03 — Histórico de Mudanças
+  2: 
+  3: Registro do que mudou, por quê e o que ficou pendente. Mais recente primeiro.
+  4: 
+  5: ---
+  6: 
+  7: ## 2026-11-02 (segundo lote)
   8: 
-  9: O módulo só envia para leads:
- 10:     - status = 'ativo'
- 11:     - tipo_telefone = 'Celular'  (nunca fixo)
- 12:     - ainda não enviados (status_whatsapp = 'pendente' ou NULL)
- 13: """
- 14: import os
- 15: import random
- 16: import re
- 17: import time
- 18: 
- 19: import requests
- 20: 
- 21: from src.config import carregar_env, str_para_bool
- 22: 
- 23: carregar_env()
- 24: 
- 25: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
- 26: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
- 27: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
- 28: 
- 29: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
- 30: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
- 31: 
- 32: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
- 33: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
- 34: 
- 35: # ---------------------------------------------------------------------------
- 36: # Cadência de envio (anti-bloqueio)
- 37: # ---------------------------------------------------------------------------
- 38: # Formato "X a cada Y segundos", ex.: WAHA_CADENCIA=3:60  -> 3 envios por minuto.
- 39: # Os envios são distribuídos ALEATORIAMENTE dentro da janela de Y segundos,
- 40: # evitando pausas fixas (15s, 15s, ...) que são mais fáceis de detectar.
- 41: WAHA_CADENCIA = os.environ.get("WAHA_CADENCIA", "").strip()
+  9: ### Janela de envio (`WAHA_JANELA_ENVIO`)
+ 10: 
+ 11: - `WAHA_DIA_INICIO_HORA` (só a hora de início) foi substituída por
+ 12:   `WAHA_JANELA_ENVIO="08:00-19:00"`: horário de **início e fim**, vazio = 24h.
+ 13: - `whatsapp.py`: `_parse_janela`, `descrever_janela`, `janela_aberta`,
+ 14:   `proxima_abertura`, `aviso_fora_da_janela`. Aceita `8-19`, `08:00-19:00` e
+ 15:   atravessar a meia-noite; inválida → aviso e libera 24h.
+ 16: - Fora da janela o menu bloqueia (inclusive o teste) e informa a próxima
+ 17:   abertura. Campanha que chega no fim da janela é interrompida e deixa os leads
+ 18:   restantes pendentes.
+ 19: - O teto diário agora renova na **abertura da janela** (`inicio_da_janela_diaria`
+ 20:   usa o início dela), coerente com "horário comercial".
+ 21: 
+ 22: ### Teto diário de envios de WhatsApp (`WAHA_LIMITE_DIA`)
+ 23: 
+ 24: - Antes existia só `WAHA_LIMITE` (**por campanha**, não por dia) e a cadência
+ 25:   `WAHA_CADENCIA` (ritmo, ex. `3:60` = 3/min). Não havia teto diário: rodar o
+ 26:   menu várias vezes no mesmo dia reiniciava a contagem.
+ 27: - Nova `WAHA_LIMITE_DIA` (vazio/0 = sem teto).
+ 28: - Contador em `whatsapp.py`: `inicio_da_janela_diaria()`, `envios_hoje(db)`
+ 29:   (COUNT em `whatsapp_envios_log` com `status='enviado'`; fallback para
+ 30:   `leads.data_envio_whatsapp` se o log não existir) e `resumo_limite_dia(db)`.
+ 31: - `disparar_campanha` corta o lote pelo restante do dia, aborta se o teto já
+ 32:   estourou e **reconfere a cada envio** (campanha longa que cruza a virada do
+ 33:   dia / outra campanha em paralelo).
+ 34: - Menu (`main.py`) mostra `enviados/teto` antes dos filtros, bloqueia quando
+ 35:   esgotado e usa o restante como padrão na pergunta de quantidade.
+ 36: - Índice `idx_whatsapp_envios_log_data (data_envio)` no `schema.py` (PG e DuckDB).
+ 37: - O contador é lido do banco, então reiniciar o programa/container não zera o dia.
+ 38: 
+ 39: ## 2026-11-02
+ 40: 
+ 41: ### Retomada de coleta (`coleta_progresso`)
  42: 
- 43: # Legado: WAHA_INTERVALO (pausa fixa) continua funcionando quando WAHA_CADENCIA
- 44: # não é informado.
- 45: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
- 46: 
- 47: # Limite de leads por campanha. Vazio = sem limite.
- 48: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
- 49: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
- 50: 
- 51: 
- 52: def _parse_cadencia(valor):
- 53:     """Interpreta "N:Y" -> (envios_por_janela, janela_segundos).
- 54: 
- 55:     Retorna None quando o valor está vazio/inválido (usa o intervalo fixo).
- 56:     """
- 57:     if not valor:
- 58:         return None
- 59:     try:
- 60:         envios, janela = valor.split(":", 1)
- 61:         envios = int(envios.strip())
- 62:         janela = int(janela.strip())
- 63:     except (ValueError, AttributeError):
- 64:         return None
- 65:     if envios <= 0 or janela <= 0:
- 66:         return None
- 67:     return envios, janela
- 68: 
- 69: 
- 70: def _intervalos_aleatorios(quantidade, janela_segundos):
- 71:     """Gera as pausas (em segundos) para `quantidade` envios numa janela.
- 72: 
- 73:     Distribui os envios em pontos aleatórios crescentes dentro da janela e
- 74:     retorna a diferença entre pontos consecutivos — o intervalo entre cada envio
- 75:     varia, mas o total da janela é respeitado.
- 76:     """
- 77:     if quantidade <= 1:
- 78:         return [0]
- 79:     # Pontos aleatórios crescentes: 1 envio em cada "fatia" da janela, com
- 80:     # jitter dentro da fatia, garantindo tempos diferentes entre os envios.
- 81:     pontos = sorted(
- 82:         random.uniform((i * janela_segundos) / quantidade,
- 83:                        ((i + 1) * janela_segundos) / quantidade)
- 84:         for i in range(quantidade)
- 85:     )
- 86:     return [round(pontos[i + 1] - pontos[i], 2) for i in range(quantidade - 1)]
- 87: 
- 88: 
- 89: def _pausas_cadencia(total, envios_janela, janela_segundos):
- 90:     """Gera as pausas da campanha inteira respeitando a cadência.
- 91: 
- 92:     Agrupa os `total` envios em janelas de `janela_segundos` segundos, com
- 93:     `envios_janela` envios por janela (distribuídos aleatoriamente). Retorna uma
- 94:     lista com `total - 1` pausas (uma entre cada par consecutivo).
- 95:     """
- 96:     if total <= 1:
- 97:         return [0]
- 98: 
- 99:     # Timestamp de envio de cada lead: janela + posição aleatória dentro dela.
-100:     tempos = []
-101:     for idx in range(total):
-102:         janela_idx = idx // envios_janela
-103:         pos_na_janela = idx % envios_janela
-104:         inicio = janela_idx * janela_segundos
-105:         # posição aleatória dentro da fatia correspondente a este envio
-106:         p = random.uniform(
-107:             inicio + (pos_na_janela * janela_segundos) / envios_janela,
-108:             inicio + ((pos_na_janela + 1) * janela_segundos) / envios_janela,
-109:         )
-110:         tempos.append(p)
-111: 
-112:     tempos.sort()
-113:     return [round(tempos[i + 1] - tempos[i], 2) for i in range(len(tempos) - 1)]
+ 43: - Antes: cada ciclo do `coleta_auto.py` percorria **todas** as UFs/cidades do
+ 44:   zero. Parar o container no meio de uma coleta nacional significava recomeçar
+ 45:   do Acre (os leads já gravados não duplicavam por causa do UPSERT, mas o
+ 46:   trabalho era refeito).
+ 47: - Nova tabela `coleta_progresso` (`nicho`, `uf`, `cidade` PK; `status`,
+ 48:   `termos_total`, `leads_total`, `tentativas`, `erro`, timestamps), criada de
+ 49:   forma idempotente pelo `LeadDatabase` na primeira gravação e também no
+ 50:   `schema.py`.
+ 51: - `LeadDatabase`: `progresso_carregar/iniciar/concluir/parcial/erro` e
+ 52:   `semear_progresso_de_leads`.
+ 53: - `coleta_auto.py`: `RETOMAR_COLETA=true` (padrão) filtra cidades já
+ 54:   concluídas; `RECAPTURA_DIAS` (padrão 30; `0` = nunca refazer) define quando
+ 55:   uma cidade concluída volta para a fila.
+ 56: - Cidade com área bloqueada (captcha/timeout) fica `parcial` e é tentada de
+ 57:   novo no ciclo seguinte — não fica 30 dias marcada como concluída.
+ 58: - `SEMEAR_PROGRESSO=true` (padrão): na primeira execução com a tabela vazia,
+ 59:   cidades que já têm leads no banco viram `concluida` (retoma uma coleta que
+ 60:   rodou antes deste recurso). Nunca sobrescreve progresso existente.
+ 61: - Validado nos dois backends: PostgreSQL (produção — tabela criada e semeada com
+ 62:   405 cidades, 5.166 restantes das 5.571) e DuckDB (setup novo).
+ 63: 
+ 64: ### CPU do scraper
+ 65: 
+ 66: - Navegador reaproveitado por thread: antes cada termo de busca abria um
+ 67:   Chromium novo (~30 launches por cidade). Agora cada worker mantém um Chromium
+ 68:   e abre só um contexto isolado por termo, reciclando o browser a cada
+ 69:   `MAX_CONTEXTOS_POR_NAVEGADOR` (padrão 40) para conter memória.
+ 70: - `BLOQUEAR_RECURSOS=true` (padrão) aborta `image`/`media`/`font` — a extração
+ 71:   é no DOM, então nada de dados se perde e a CPU cai.
+ 72: - Flags do Chromium para reduzir trabalho de renderização/rede.
+ 73: - Contagem de perfis na rolagem passou a ser feita em JS (`page.evaluate`) em
+ 74:   vez de `query_selector_all` + `get_attribute` por link a cada rolagem.
+ 75: - Busca de Instagram usa seletor direto (`a[href*="instagram.com"]`).
+ 76: - `SCRAPER_THREADS` (padrão 3) configurável: em VPS pequena, 1 ou 2.
+ 77: - Runner passou a usar fila + workers (`queue`) com persistência na thread
+ 78:   principal; `estatisticas` informa `areas_total/areas_ok/areas_erro`.
+ 79: 
+ 80: 
+ 81: ## 2026-10-31
+ 82: 
+ 83: ### Migração para PostgreSQL + suporte dual (PostgreSQL/DuckDB)
+ 84: 
+ 85: - Banco externo PostgreSQL (`vps.agendamentoja.com/leads_db`) + mantido o DuckDB
+ 86:   local como alternativa offline.
+ 87: - Novo `src/backend.py`: abstrai conexão, placeholder (`?`/`%s`), leitura
+ 88:   (DataFrame/tupla) e bulk upsert entre os dois bancos. `database.py`,
+ 89:   `localidades_db.py` e `schema.py` não importam mais `duckdb`/`psycopg2`.
+ 90: - `config.py` lê `DB_ENGINE` (postgres|duckdb), `DATABASE_URL` e `DUCKDB_PATH`.
+ 91:   Inferência: DUCKDB_PATH → duckdb; senão DATABASE_URL → postgres; senão duckdb.
+ 92: - `schema.py` reescrito para os dois bancos; corrige o gap da tabela `leads`
+ 93:   (PK `lead_id` + UNIQUE `(nome,cidade)` + default `nextval('seq_leads_id')`).
+ 94: - `requirements.txt`: readicionado `duckdb` + `psycopg2-binary`.
+ 95: - `.env`: seção "BANCO DE DADOS — engine independente" com `DATABASE_URL` (senha
+ 96:   com `@` percent-encoded) e config antiga comentada como referência.
+ 97: 
+ 98: ### Cadência aleatória de envio WhatsApp (anti-bloqueio)
+ 99: 
+100: - Nova `WAHA_CADENCIA="X:Y"` no `.env` (ex.: `3:60` = 3 envios por minuto).
+101: - `whatsapp.py`: `_parse_cadencia` + `_pausas_cadencia` distribuem os envios em
+102:   pontos **aleatórios** dentro de cada janela (pausas variáveis, não fixas).
+103: - Tem prioridade sobre `WAHA_INTERVALO` (fixo). `WAHA_CADENCIA` vazio → usa o fixo.
+104: 
+105: ### Tabela `whatsapp_envios_log` (rastreamento)
+106: 
+107: - Log por envio com `lead_id`, `telefone` (dígitos) e `telefone_normalizado`
+108:   (55DDDNUMERO), `chat_id`, `status`, `mensagem`, `payload`, `erro`, `data_envio`.
+109: - JOIN pronto por `lead_id` ou `telefone`.
+110: 
+111: ---
+112: 
+113: ## 2026-10-30
 114: 
-115: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
-116: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
-117: 
-118: 
-119: def _normalizar_chatid(telefone):
-120:     """Converte o telefone salvo em um chatId clássico do WAHA (55DDDNUMERO@c.us)."""
-121:     numero = re.sub(r"\D", "", str(telefone or ""))
-122:     if not numero:
-123:         return None
-124: 
-125:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
-126:     if numero.startswith("55") and len(numero) > 11:
-127:         numero = numero[2:]
-128: 
-129:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
-130:     if len(numero) != 11:
-131:         return None
-132: 
-133:     return f"55{numero}@c.us"
-134: 
+115: ### Templates de mensagem de WhatsApp (tabela + markdown)
+116: 
+117: - Nova tabela `templates_whatsapp` (`id`, `mensagem`, `descricao`, `ativo`),
+118:   criada e seedada no `LeadDatabase.__init__` (idempotente, `id=1` =
+119:   "Apresentação Agendamento Já").
+120: - `listar_templates_ativos()` retorna só os ativos para o menu de envio.
+121: - `_limpar_markdown_whatsapp` remove `**negrito**` e converte `[rótulo](url)` em
+122:   texto plano antes do envio (o template usa markdown; o WhatsApp não renderiza).
+123: 
+124: ### Menu de envio: template + filtros + teste
+125: 
+126: - `enviar_whatsapp_menu()` agora: escolhe template → aplica filtros → pergunta se
+127:   quer **teste de envio** → confirma e dispara.
+128: - Filtros de envio (menu "FILTROS DE ENVIO"): 0 todos / 1 por número / 2 por
+129:   cidade / 3 por nicho. Número aceita parte e compara só dígitos.
+130: - `testar_envio()`: digita um número com DDD ou escolhe um lead pendente.
+131: - `disparar_campanha` passou a aceitar `leads` (DataFrame já filtrado) — sem isso
+132:   os filtros eram ignorados no disparo (ele reconsultava o banco).
+133: 
+134: ### Correção crítica: chatId `@lid` vs `@c.us` (WAHA)
 135: 
-136: def _resolver_chatid_waha(telefone, session=None, api_url=None, api_key=None):
-137:     """Resolve o chatId correto via /api/checkNumberStatus.
-138: 
-139:     Números recentes no WhatsApp usam o formato @lid (hidden user ID) em vez do
-140:     clássico @c.us. Enviar com @c.us para esses números retorna HTTP 500.
-141:     A WAHA responde o chatId certo via checkNumberStatus; usamos ele e, se a
-142:     consulta falhar ou o número não existir, caímos no formato clássico @c.us.
-143:     """
-144:     session = session or WAHA_SESSION
-145:     api_url = api_url or WAHA_API_URL
-146:     api_key = api_key if api_key is not None else WAHA_API_KEY
-147: 
-148:     numero = re.sub(r"\D", "", str(telefone or ""))
-149:     if not numero:
-150:         return None
-151: 
-152:     if numero.startswith("55") and len(numero) > 11:
-153:         numero = numero[2:]
-154:     if len(numero) != 11:
-155:         return None
-156: 
-157:     telefone_internacional = f"55{numero}"
-158: 
-159:     headers = {"Accept": "application/json"}
-160:     if api_key:
-161:         headers["X-Api-Key"] = api_key
-162: 
-163:     url = f"{api_url.rstrip('/')}/api/checkNumberStatus"
-164:     params = {"session": session, "phone": telefone_internacional}
-165: 
-166:     try:
-167:         response = requests.get(url, params=params, headers=headers, timeout=20)
-168:         response.raise_for_status()
-169:         dados = response.json()
-170:         if dados.get("numberExists") and dados.get("chatId"):
-171:             return dados["chatId"]
-172:     except Exception:
-173:         pass
-174: 
-175:     # Fallback: formato clássico @c.us (funciona para números mais antigos).
-176:     return f"{telefone_internacional}@c.us"
-177: 
-178: 
-179: def _limpar_markdown_whatsapp(texto):
-180:     """Remove marcação de markdown (negrito e links) antes de enviar ao WhatsApp.
+136: - **Sintoma:** `500 Server Error` no `/api/sendText` para o número do mantenedor.
+137: - **Causa:** número recente usa `@lid`; enviar `@c.us` retorna HTTP 500.
+138: - **Correção:** `_resolver_chatid_waha` consulta `/api/checkNumberStatus` e usa o
+139:   chatId retornado; fallback `@c.us` para números antigos.
+140: - **Cache:** coluna `leads.chat_id_waha` + `salvar_chat_id_waha` — a resolução é
+141:   feita uma única vez por lead (menos chamadas e reenvio mais rápido).
+142: - `data_envio_whatsapp` continua gravada só no sucesso; `status_whatsapp` em
+143:   `enviado`/`falhou`.
+144: 
+145: ---
+146: 
+147: ## 2026-10-29
+148: 
+149: ### Memória do projeto para IA
+150: 
+151: - Criada a pasta `memory/` com documentação densa para reduzir custo de contexto.
+152: - Arquivos: `README.md`, `00-resumo-projeto.md`, `01-arquitetura-e-modulos.md`,
+153:   `02-decisoes-e-armadilhas.md`, `03-historico-de-mudancas.md`,
+154:   `04-como-contribuir.md` (padrões de código, logs, config, testes e docs).
+155: - `README.md` limpo: removido o bloco "env temp:" (dump cru do `.env`) e
+156:   adicionadas as seções 12 (memória para IA) e 13 (observação sobre configuração).
+157: 
+158: ### Correção: cache de bairros ignorado (`bairros_fonte`)
+159: 
+160: - **Sintoma:** com `LOCALIDADES_USAR_CACHE=true` e base populada, a coleta ainda
+161:   consultava IBGE e Overpass.
+162: - **Causa:** `localidades_db.ler_municipios()` não retornava `bairros_fonte`;
+163:   `_resolver_municipio` repassava `None`, então o cache nunca era considerado.
+164: - **Correção:** query passou a trazer `uf` e `bairros_fonte`; o resolver repassa
+165:   o valor real.
+166: - **Teste:** com as funções de rede trocadas por `AssertionError`, os bairros de
+167:   Canoas (fonte `overpass`) e Bento Gonçalves (fonte `ibge`) vieram do banco.
+168: 
+169: ### Nome oficial do município (IBGE) na coleta
+170: 
+171: - `obter_municipio(cidade, uf)` confirma o município e devolve `id_municipio`,
+172:   `nome` oficial e `uf`.
+173: - `filtrar_cidades(cidades, termo)` compara **sem acento e sem caixa**:
+174:   `canoas`, `sao leopoldo`, `CHAPECO` funcionam.
+175: - `main.coletar_leads()` passa a usar o nome oficial no scraping, no banco e no
+176:   nome do Excel, e imprime `Município (IBGE): Canoas-RS | código 4304606`.
+177: - Lista de municípios **memoizada** por execução (`_municipios_da_uf`), evitando
+178:   rebaixar a lista da UF a cada cidade (principalmente com `SALVAR=false`).
+179: 
+180: ### Mensagens de bairros mais honestas
 181: 
-182:     - **texto**  -> texto
-183:     - [rótulo](url) -> url (quando o rótulo já é a própria URL) ou "rótulo (url)"
-184:     """
-185:     texto = re.sub(r"\*\*([^*]+)\*\*", r"\1", texto)
-186: 
-187:     def _sub_link(match):
-188:         rotulo = match.group(1)
-189:         url = match.group(2)
-190:         if rotulo.strip() == url.strip():
-191:             return url
-192:         return f"{rotulo} ({url})"
-193: 
-194:     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _sub_link, texto)
+182: - Antes: `IBGE retornou 0 distrito(s) útil(eis)`.
+183: - Agora: `IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).`
+184: - Motivo: a API de Localidades do IBGE **não tem bairros** (só distritos).
+185: 
+186: ### Aquecimento de bairros por UF (menu 4)
+187: 
+188: - `locations.aquecer_bairros_uf(uf, cidades=None, max_cidades=0, pausa_segundos=None)`.
+189: - `localidades_db.ler_municipios_pendentes(uf)` → só `bairros_fonte IS NULL`.
+190: - Retoma de onde parou; `Ctrl+C` preserva o que já foi gravado.
+191: - Pausa (`AQUECER_PAUSA_SEGUNDOS`, default 2) só quando a cidade usou o OSM.
+192: - Falha de rede não grava nada (`falhas` no resumo) e a cidade continua pendente.
+193: - Bloqueado quando `LOCALIDADES_SALVAR=false`.
+194: - Medido: AC 21 → 18 → 17 pendentes; SP 621 → 616.
 195: 
-196: 
-197: def _renderizar_mensagem(template, lead):
-198:     """Substitui {nome}, {bairro} e {cidade} de forma segura e limpa o markdown."""
-199:     bairro = str(lead.get("bairro") or "sua região")
-200:     cidade = str(lead.get("cidade") or "")
-201:     texto = (
-202:         template
-203:         .replace("{nome}", str(lead.get("nome") or ""))
-204:         .replace("{bairro}", bairro)
-205:         .replace("{cidade}", cidade)
-206:     )
-207:     return _limpar_markdown_whatsapp(texto)
-208: 
+196: ### Flag `LOCALIDADES_SALVAR`
+197: 
+198: - `false` = somente leitura: nenhuma escrita, **nem criação de tabelas**
+199:   (`localidades_db.CRIAR_TABELAS = False`) e menus 3/4 desativados.
+200: - Todas as escritas passam por `_salvar()`, que respeita a flag.
+201: - Aviso único por execução para não poluir o log.
+202: 
+203: ### `.env` e `.env.example` comentados
+204: 
+205: - Cada variável com explicação, faixa de valores e efeito colateral.
+206: - Tabela das 4 combinações `USAR_CACHE × SALVAR`.
+207: - Regra explícita: comentário só em linha própria.
+208: - Valores locais preservados (`USAR_CACHE=false` → depois `true`).
 209: 
-210: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
-211:     """Envia uma mensagem de texto via WAHA."""
-212:     session = session or WAHA_SESSION
-213:     api_url = api_url or WAHA_API_URL
-214:     api_key = api_key if api_key is not None else WAHA_API_KEY
-215:     url = f"{api_url.rstrip('/')}/api/sendText"
-216: 
-217:     payload = {
-218:         "session": session,
-219:         "chatId": chat_id,
-220:         "text": texto,
-221:     }
-222: 
-223:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
-224:     if api_key:
-225:         headers["X-Api-Key"] = api_key
-226: 
-227:     response = requests.post(url, json=payload, headers=headers, timeout=30)
-228:     response.raise_for_status()
-229:     return response.json()
+210: ### Base de localidades offline (IBGE) — menu 3
+211: 
+212: - Novo `src/localidades_db.py` com tabelas `localidades_estados`,
+213:   `localidades_municipios`, `localidades_bairros` no mesmo `leads.duckdb`.
+214: - `src/config.py` centraliza o loader do `.env` (antes duplicado no `whatsapp.py`).
+215: - `src/locations.py` reescrito: cache → API → grava.
+216: - Sync nacional: 27 estados, 5.571 municípios, 10.751 distritos; 643 cidades com
+217:   bairros prontos pelo IBGE.
+218: - Fallback OSM por cidade, gravado uma única vez.
+219: 
+220: ### Anti-captcha / bloqueio do Google Maps
+221: 
+222: - Detecção por URL `/sorry/`, seletores de captcha e textos ("tráfego incomum").
+223: - Retry com pausa longa (`CAPTCHA_PAUSA_SEGUNDOS`) e **cooldown global**
+224:   (`CAPTCHA_PAUSA_GLOBAL_SEGUNDOS`) entre todas as threads.
+225: - Bloqueio persistente → aborta a área e **preserva os leads já extraídos**.
+226: - Testado com Playwright real: página normal passa, página de captcha levanta
+227:   `BloqueioDetectado` após `CAPTCHA_MAX_TENTATIVAS`.
+228: 
+229: ### Correção: menu não aparecia
 230: 
-231: 
-232: def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None):
-233:     """Envia uma mensagem de texto para um número bruto (com DDD), já normalizado.
-234: 
-235:     Útil para o envio de teste, sem precisar de um lead no banco.
-236:     """
-237:     texto = _limpar_markdown_whatsapp(texto)
-238:     chat_id = _resolver_chatid_waha(numero, session=session, api_url=api_url, api_key=api_key)
-239:     if not chat_id:
-240:         raise ValueError(f"Número inválido para envio: {numero}")
-241:     return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
-242: 
+231: - `src/main.py` definia `menu_interativo()` mas **nunca chamava**.
+232: - Adicionado `if __name__ == "__main__": menu_interativo()`.
+233: 
+234: ### Banco DuckDB versionado
+235: 
+236: - `data/leads.duckdb` passou a ser versionado no Git.
+237: - `.gitignore`: removidos `data/` e `*.duckdb` da lista de ignore; adicionados
+238:   `*.duckdb.wal` e `*.duckdb.tmp`.
+239: - `*.xlsx`, `*.csv`, `*.log` continuam ignorados (confirmado com
+240:   `git check-ignore` e `git ls-files`).
+241: - ⚠️ Comitar com o programa aberto sobe o `.duckdb` sem o `.wal` (dados
+242:   desatualizados). Fechar antes.
 243: 
-244: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None):
-245:     """Envia mensagens para os leads celulares pendentes.
-246: 
-247:     - db: instância de LeadDatabase
-248:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
-249:     - intervalo: pausa fixa em segundos entre envios (usado se não houver cadência)
-250:     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
-251:     """
-252:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
-253:     if leads is None:
-254:         leads = db.get_leads_para_envio(limite)
-255: 
-256:     if leads.empty:
-257:         print("Nenhum lead celular pendente de envio.")
-258:         return
-259: 
-260:     total = len(leads)
-261: 
-262:     # Cadência aleatória (ex.: 3 a cada 60s) tem prioridade sobre o intervalo fixo.
-263:     cadencia = _parse_cadencia(WAHA_CADENCIA)
-264:     if cadencia:
-265:         envios_janela, janela = cadencia
-266:         pausas = _pausas_cadencia(total, envios_janela, janela)
-267:         print(f"Enviando para {total} lead(s), cadência {envios_janela} a cada {janela}s "
-268:               f"(intervalos aleatórios)...")
-269:     else:
-270:         pausas = [intervalo] * max(0, total - 1)
-271:         print(f"Enviando para {total} lead(s), com intervalo fixo de {intervalo}s...")
-272: 
-273:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
-274:         texto = _renderizar_mensagem(mensagem_template, lead)
-275:         lead_id = lead.get("lead_id")
-276:         telefone = lead.get("telefone")
-277:         nome = lead.get("nome")
-278:         cidade = lead.get("cidade")
-279: 
-280:         chat_id = lead.get("chat_id_waha")
-281:         if not chat_id:
-282:             # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
-283:             # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
-284:             chat_id = _resolver_chatid_waha(telefone)
-285:             if chat_id:
-286:                 db.salvar_chat_id_waha(nome, cidade, chat_id)
-287: 
-288:         if not chat_id:
-289:             db.marcar_envio(nome, cidade, "falhou")
-290:             db.salvar_log_envio(
-291:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
-292:                 mensagem=texto, erro="telefone inválido",
-293:             )
-294:             print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
-295:             continue
-296: 
-297:         try:
-298:             resposta = enviar_texto_waha(chat_id, texto)
-299:             db.marcar_envio(nome, cidade, "enviado")
-300:             db.salvar_log_envio(
-301:                 lead_id, nome, cidade, telefone, chat_id, "enviado",
-302:                 mensagem=texto, payload=resposta,
-303:             )
-304:             print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
-305:         except Exception as e:
-306:             payload_erro = None
-307:             if getattr(e, "response", None) is not None:
-308:                 try:
-309:                     payload_erro = e.response.text
-310:                 except Exception:
-311:                     payload_erro = None
-312:             erro = f"{type(e).__name__}: {e}"
-313:             db.marcar_envio(nome, cidade, "falhou")
-314:             db.salvar_log_envio(
-315:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
-316:                 mensagem=texto, payload=payload_erro, erro=erro,
-317:             )
-318:             print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
-319: 
-320:         if i < total:
-321:             time.sleep(pausas[i - 1])
-322: 
-323:     print("Campanha finalizada.")
+244: ---
+245: 
+246: ## Pendências / próximos passos
+247: 
+248: | Item | Status |
+249: |---|---|
+250: | Bairros oficiais via CNEFE 2022 | **Não implementar por hora** (decisão do mantenedor) |
+251: | Resolução automática de captcha (2Captcha/CapMonster) | Não implementado; hoje pausa e desiste da área |
+252: | Enriquecimento de e-mail a partir dos sites | Não iniciado |
+253: | Base de bairros offline nacional | Coberto parcialmente pelo IBGE (643 cidades) |
+254: 
+255: ## Problemas conhecidos (ambiente)
+256: 
+257: - **DBeaver aberto trava o DuckDB** → cache cai para as APIs.
+258: - **Overpass/Nominatim instáveis** (502, timeout) → aquecimento por UF precisa de
+259:   paciência e retomadas.
+260: - Interprete global do mantenedor é Python 3.15; **usar `venv\Scripts\python.exe`**.
 ````
 
 ## File: src/database.py
@@ -3891,6 +3601,551 @@ requirements.txt
 350:         backend.close(self.conn)
 ````
 
+## File: src/whatsapp.py
+````python
+  1: # src/whatsapp.py
+  2: """Integração com a WAHA (WhatsApp HTTP API) para envio de mensagens aos leads.
+  3: 
+  4: Configuração via variáveis de ambiente:
+  5:     WAHA_API_URL   -> URL base da WAHA (padrão: http://localhost:3000)
+  6:     WAHA_API_KEY   -> chave de API da WAHA (obrigatória se a instância exigir)
+  7:     WAHA_SESSION   -> nome da sessão conectada na WAHA (padrão: "default")
+  8: 
+  9: O módulo só envia para leads:
+ 10:     - status = 'ativo'
+ 11:     - tipo_telefone = 'Celular'  (nunca fixo)
+ 12:     - ainda não enviados (status_whatsapp = 'pendente' ou NULL)
+ 13: """
+ 14: import os
+ 15: import random
+ 16: import re
+ 17: import time
+ 18: from datetime import datetime, timedelta
+ 19: 
+ 20: import requests
+ 21: 
+ 22: from src import backend
+ 23: from src.config import carregar_env, env_int, str_para_bool
+ 24: 
+ 25: carregar_env()
+ 26: 
+ 27: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
+ 28: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
+ 29: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
+ 30: 
+ 31: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
+ 32: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
+ 33: 
+ 34: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
+ 35: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
+ 36: 
+ 37: # ---------------------------------------------------------------------------
+ 38: # Cadência de envio (anti-bloqueio)
+ 39: # ---------------------------------------------------------------------------
+ 40: # Formato "X a cada Y segundos", ex.: WAHA_CADENCIA=3:60  -> 3 envios por minuto.
+ 41: # Os envios são distribuídos ALEATORIAMENTE dentro da janela de Y segundos,
+ 42: # evitando pausas fixas (15s, 15s, ...) que são mais fáceis de detectar.
+ 43: WAHA_CADENCIA = os.environ.get("WAHA_CADENCIA", "").strip()
+ 44: 
+ 45: # Legado: WAHA_INTERVALO (pausa fixa) continua funcionando quando WAHA_CADENCIA
+ 46: # não é informado.
+ 47: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
+ 48: 
+ 49: # Limite de leads por campanha (uma execução do envio). Vazio = sem limite.
+ 50: # ATENÇÃO: é por campanha, NÃO por dia. Para teto diário use WAHA_LIMITE_DIA.
+ 51: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
+ 52: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
+ 53: 
+ 54: # ---------------------------------------------------------------------------
+ 55: # Janela de envio (horário permitido) e limite diário
+ 56: # ---------------------------------------------------------------------------
+ 57: # Teto de mensagens enviadas por dia, somando TODAS as campanhas. O contador é
+ 58: # lido do log (`whatsapp_envios_log`, status='enviado'), então reiniciar o
+ 59: # processo não "zera" o limite. Vazio/0 = sem teto diário.
+ 60: WAHA_LIMITE_DIA = env_int("WAHA_LIMITE_DIA", 0) or None
+ 61: 
+ 62: # Horário permitido para envio: "08:00-19:00" (ou "8-19").
+ 63: # Vazio = envia a qualquer hora. Aceita janela que atravessa a meia-noite
+ 64: # (ex.: "22:00-06:00"). O dia do teto diário começa junto com a janela.
+ 65: WAHA_JANELA_ENVIO = os.environ.get("WAHA_JANELA_ENVIO", "").strip()
+ 66: 
+ 67: _PADRAO_JANELA = re.compile(
+ 68:     r"^\s*(\d{1,2})(?::(\d{2}))?\s*(?:-|–|a|as|às)\s*(\d{1,2})(?::(\d{2}))?\s*$",
+ 69:     re.IGNORECASE,
+ 70: )
+ 71: 
+ 72: 
+ 73: def _parse_janela(valor):
+ 74:     """Interpreta "08:00-19:00" -> (minuto_inicio, minuto_fim).
+ 75: 
+ 76:     Retorna None para vazio/inválido ou quando começa e termina no mesmo
+ 77:     horário (24h). A janela pode atravessar a meia-noite (início > fim).
+ 78:     """
+ 79:     if not valor:
+ 80:         return None
+ 81:     casamento = _PADRAO_JANELA.match(valor)
+ 82:     if not casamento:
+ 83:         print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
+ 84:               f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
+ 85:         return None
+ 86: 
+ 87:     h1, m1, h2, m2 = casamento.groups()
+ 88:     horas = (int(h1), int(m1 or 0), int(h2), int(m2 or 0))
+ 89:     if horas[0] > 23 or horas[1] > 59 or horas[2] > 23 or horas[3] > 59:
+ 90:         print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
+ 91:               f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
+ 92:         return None
+ 93: 
+ 94:     inicio = horas[0] * 60 + horas[1]
+ 95:     fim = horas[2] * 60 + horas[3]
+ 96:     if inicio == fim:
+ 97:         return None
+ 98:     return inicio, fim
+ 99: 
+100: 
+101: _JANELA = _parse_janela(WAHA_JANELA_ENVIO)
+102: 
+103: 
+104: def descrever_janela():
+105:     """Texto da janela configurada (ex.: '08:00-19:00')."""
+106:     if not _JANELA:
+107:         return "24h (sem janela)"
+108:     inicio, fim = _JANELA
+109:     return f"{inicio // 60:02d}:{inicio % 60:02d}-{fim // 60:02d}:{fim % 60:02d}"
+110: 
+111: 
+112: def janela_aberta(agora=None):
+113:     """True quando o horário atual está dentro da janela de envio."""
+114:     if not _JANELA:
+115:         return True
+116:     agora = agora or datetime.now()
+117:     atual = agora.hour * 60 + agora.minute
+118:     inicio, fim = _JANELA
+119:     if inicio < fim:
+120:         return inicio <= atual < fim
+121:     return atual >= inicio or atual < fim  # atravessa a meia-noite
+122: 
+123: 
+124: def inicio_da_janela_diaria(agora=None):
+125:     """Início do ciclo atual da janela (base da contagem do teto diário).
+126: 
+127:     Sem janela configurada, o dia começa à meia-noite. Com janela, começa na
+128:     abertura dela — então o teto diário "renova" quando o horário permitido abre.
+129:     """
+130:     agora = agora or datetime.now()
+131:     inicio_min = _JANELA[0] if _JANELA else 0
+132:     inicio = agora.replace(
+133:         hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
+134:     )
+135:     if agora < inicio:
+136:         inicio -= timedelta(days=1)
+137:     return inicio
+138: 
+139: 
+140: def proxima_abertura(agora=None):
+141:     """Próximo momento em que o envio volta a ser permitido (agora, se aberto)."""
+142:     agora = agora or datetime.now()
+143:     if janela_aberta(agora):
+144:         return agora
+145:     inicio_min = _JANELA[0]
+146:     abertura = agora.replace(
+147:         hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
+148:     )
+149:     if agora >= abertura:
+150:         abertura += timedelta(days=1)
+151:     return abertura
+152: 
+153: 
+154: def aviso_fora_da_janela():
+155:     """Informa que o envio está bloqueado e quando ele volta a ser permitido."""
+156:     abertura = proxima_abertura()
+157:     print(f"Fora da janela de envio ({descrever_janela()}). "
+158:           f"Próximo envio a partir de {abertura:%d/%m às %H:%M}.")
+159: 
+160: 
+161: def envios_hoje(db, desde=None):
+162:     """Quantidade de envios concluídos na janela do dia atual.
+163: 
+164:     Usa o log de envios (uma linha por tentativa) como fonte de verdade, então
+165:     vale para qualquer campanha/processo que use o mesmo banco. Se a tabela de
+166:     log ainda não existir, cai para `leads.data_envio_whatsapp`.
+167:     """
+168:     desde = desde or inicio_da_janela_diaria()
+169:     p = backend.ph()
+170:     try:
+171:         total = backend.query_one(db.conn, f"""
+172:             SELECT COUNT(*) FROM whatsapp_envios_log
+173:             WHERE status = {p} AND data_envio >= {p}
+174:         """, ["enviado", desde])
+175:     except Exception:
+176:         total = backend.query_one(db.conn, f"""
+177:             SELECT COUNT(*) FROM leads
+178:             WHERE data_envio_whatsapp IS NOT NULL AND data_envio_whatsapp >= {p}
+179:         """, [desde])
+180:     return int((total or [0])[0] or 0)
+181: 
+182: 
+183: def resumo_limite_dia(db):
+184:     """(enviados_hoje, restante). `restante` é None quando não há teto diário."""
+185:     if not WAHA_LIMITE_DIA:
+186:         return 0, None
+187:     enviados = envios_hoje(db)
+188:     return enviados, max(0, WAHA_LIMITE_DIA - enviados)
+189: 
+190: 
+191: def _parse_cadencia(valor):
+192:     """Interpreta "N:Y" -> (envios_por_janela, janela_segundos).
+193: 
+194:     Retorna None quando o valor está vazio/inválido (usa o intervalo fixo).
+195:     """
+196:     if not valor:
+197:         return None
+198:     try:
+199:         envios, janela = valor.split(":", 1)
+200:         envios = int(envios.strip())
+201:         janela = int(janela.strip())
+202:     except (ValueError, AttributeError):
+203:         return None
+204:     if envios <= 0 or janela <= 0:
+205:         return None
+206:     return envios, janela
+207: 
+208: 
+209: def _intervalos_aleatorios(quantidade, janela_segundos):
+210:     """Gera as pausas (em segundos) para `quantidade` envios numa janela.
+211: 
+212:     Distribui os envios em pontos aleatórios crescentes dentro da janela e
+213:     retorna a diferença entre pontos consecutivos — o intervalo entre cada envio
+214:     varia, mas o total da janela é respeitado.
+215:     """
+216:     if quantidade <= 1:
+217:         return [0]
+218:     # Pontos aleatórios crescentes: 1 envio em cada "fatia" da janela, com
+219:     # jitter dentro da fatia, garantindo tempos diferentes entre os envios.
+220:     pontos = sorted(
+221:         random.uniform((i * janela_segundos) / quantidade,
+222:                        ((i + 1) * janela_segundos) / quantidade)
+223:         for i in range(quantidade)
+224:     )
+225:     return [round(pontos[i + 1] - pontos[i], 2) for i in range(quantidade - 1)]
+226: 
+227: 
+228: def _pausas_cadencia(total, envios_janela, janela_segundos):
+229:     """Gera as pausas da campanha inteira respeitando a cadência.
+230: 
+231:     Agrupa os `total` envios em janelas de `janela_segundos` segundos, com
+232:     `envios_janela` envios por janela (distribuídos aleatoriamente). Retorna uma
+233:     lista com `total - 1` pausas (uma entre cada par consecutivo).
+234:     """
+235:     if total <= 1:
+236:         return [0]
+237: 
+238:     # Timestamp de envio de cada lead: janela + posição aleatória dentro dela.
+239:     tempos = []
+240:     for idx in range(total):
+241:         janela_idx = idx // envios_janela
+242:         pos_na_janela = idx % envios_janela
+243:         inicio = janela_idx * janela_segundos
+244:         # posição aleatória dentro da fatia correspondente a este envio
+245:         p = random.uniform(
+246:             inicio + (pos_na_janela * janela_segundos) / envios_janela,
+247:             inicio + ((pos_na_janela + 1) * janela_segundos) / envios_janela,
+248:         )
+249:         tempos.append(p)
+250: 
+251:     tempos.sort()
+252:     return [round(tempos[i + 1] - tempos[i], 2) for i in range(len(tempos) - 1)]
+253: 
+254: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
+255: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
+256: 
+257: 
+258: def _normalizar_chatid(telefone):
+259:     """Converte o telefone salvo em um chatId clássico do WAHA (55DDDNUMERO@c.us)."""
+260:     numero = re.sub(r"\D", "", str(telefone or ""))
+261:     if not numero:
+262:         return None
+263: 
+264:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
+265:     if numero.startswith("55") and len(numero) > 11:
+266:         numero = numero[2:]
+267: 
+268:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
+269:     if len(numero) != 11:
+270:         return None
+271: 
+272:     return f"55{numero}@c.us"
+273: 
+274: 
+275: def _resolver_chatid_waha(telefone, session=None, api_url=None, api_key=None):
+276:     """Resolve o chatId correto via /api/checkNumberStatus.
+277: 
+278:     Números recentes no WhatsApp usam o formato @lid (hidden user ID) em vez do
+279:     clássico @c.us. Enviar com @c.us para esses números retorna HTTP 500.
+280:     A WAHA responde o chatId certo via checkNumberStatus; usamos ele e, se a
+281:     consulta falhar ou o número não existir, caímos no formato clássico @c.us.
+282:     """
+283:     session = session or WAHA_SESSION
+284:     api_url = api_url or WAHA_API_URL
+285:     api_key = api_key if api_key is not None else WAHA_API_KEY
+286: 
+287:     numero = re.sub(r"\D", "", str(telefone or ""))
+288:     if not numero:
+289:         return None
+290: 
+291:     if numero.startswith("55") and len(numero) > 11:
+292:         numero = numero[2:]
+293:     if len(numero) != 11:
+294:         return None
+295: 
+296:     telefone_internacional = f"55{numero}"
+297: 
+298:     headers = {"Accept": "application/json"}
+299:     if api_key:
+300:         headers["X-Api-Key"] = api_key
+301: 
+302:     url = f"{api_url.rstrip('/')}/api/checkNumberStatus"
+303:     params = {"session": session, "phone": telefone_internacional}
+304: 
+305:     try:
+306:         response = requests.get(url, params=params, headers=headers, timeout=20)
+307:         response.raise_for_status()
+308:         dados = response.json()
+309:         if dados.get("numberExists") and dados.get("chatId"):
+310:             return dados["chatId"]
+311:     except Exception:
+312:         pass
+313: 
+314:     # Fallback: formato clássico @c.us (funciona para números mais antigos).
+315:     return f"{telefone_internacional}@c.us"
+316: 
+317: 
+318: def _limpar_markdown_whatsapp(texto):
+319:     """Remove marcação de markdown (negrito e links) antes de enviar ao WhatsApp.
+320: 
+321:     - **texto**  -> texto
+322:     - [rótulo](url) -> url (quando o rótulo já é a própria URL) ou "rótulo (url)"
+323:     """
+324:     texto = re.sub(r"\*\*([^*]+)\*\*", r"\1", texto)
+325: 
+326:     def _sub_link(match):
+327:         rotulo = match.group(1)
+328:         url = match.group(2)
+329:         if rotulo.strip() == url.strip():
+330:             return url
+331:         return f"{rotulo} ({url})"
+332: 
+333:     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _sub_link, texto)
+334: 
+335: 
+336: def _renderizar_mensagem(template, lead):
+337:     """Substitui {nome}, {bairro} e {cidade} de forma segura e limpa o markdown."""
+338:     bairro = str(lead.get("bairro") or "sua região")
+339:     cidade = str(lead.get("cidade") or "")
+340:     texto = (
+341:         template
+342:         .replace("{nome}", str(lead.get("nome") or ""))
+343:         .replace("{bairro}", bairro)
+344:         .replace("{cidade}", cidade)
+345:     )
+346:     return _limpar_markdown_whatsapp(texto)
+347: 
+348: 
+349: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
+350:     """Envia uma mensagem de texto via WAHA."""
+351:     session = session or WAHA_SESSION
+352:     api_url = api_url or WAHA_API_URL
+353:     api_key = api_key if api_key is not None else WAHA_API_KEY
+354:     url = f"{api_url.rstrip('/')}/api/sendText"
+355: 
+356:     payload = {
+357:         "session": session,
+358:         "chatId": chat_id,
+359:         "text": texto,
+360:     }
+361: 
+362:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
+363:     if api_key:
+364:         headers["X-Api-Key"] = api_key
+365: 
+366:     response = requests.post(url, json=payload, headers=headers, timeout=30)
+367:     response.raise_for_status()
+368:     return response.json()
+369: 
+370: 
+371: def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None):
+372:     """Envia uma mensagem de texto para um número bruto (com DDD), já normalizado.
+373: 
+374:     Útil para o envio de teste, sem precisar de um lead no banco.
+375:     """
+376:     texto = _limpar_markdown_whatsapp(texto)
+377:     chat_id = _resolver_chatid_waha(numero, session=session, api_url=api_url, api_key=api_key)
+378:     if not chat_id:
+379:         raise ValueError(f"Número inválido para envio: {numero}")
+380:     return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
+381: 
+382: 
+383: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None):
+384:     """Envia mensagens para os leads celulares pendentes.
+385: 
+386:     - db: instância de LeadDatabase
+387:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
+388:     - intervalo: pausa fixa em segundos entre envios (usado se não houver cadência)
+389:     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
+390: 
+391:     Respeita dois tetos independentes:
+392:     - `leads`/`limite`: quantos enviar nesta campanha;
+393:     - `WAHA_LIMITE_DIA`: quantos enviar no dia (soma todas as campanhas).
+394:     E a janela de horário `WAHA_JANELA_ENVIO` (ex.: 08:00-19:00): fora dela nada
+395:     é enviado, e a campanha para se a janela fechar no meio.
+396:     """
+397:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
+398:     if leads is None:
+399:         leads = db.get_leads_para_envio(limite)
+400: 
+401:     if leads.empty:
+402:         print("Nenhum lead celular pendente de envio.")
+403:         return
+404: 
+405:     total = len(leads)
+406: 
+407:     # Fora do horário permitido: não inicia a campanha.
+408:     if not janela_aberta():
+409:         aviso_fora_da_janela()
+410:         return
+411: 
+412:     # Teto diário (soma todas as campanhas do dia, lido do log de envios).
+413:     enviados_hoje = 0
+414:     if WAHA_LIMITE_DIA:
+415:         enviados_hoje = envios_hoje(db)
+416:         restante_dia = WAHA_LIMITE_DIA - enviados_hoje
+417:         if restante_dia <= 0:
+418:             print(f"Limite diário atingido: {enviados_hoje}/{WAHA_LIMITE_DIA} envios hoje.")
+419:             print(f"Os envios voltam na próxima janela ({descrever_janela()}).")
+420:             return
+421:         if total > restante_dia:
+422:             print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} já enviados hoje; "
+423:                   f"reduzindo esta campanha para {restante_dia} envio(s).")
+424:             leads = leads.head(restante_dia)
+425:             total = len(leads)
+426: 
+427:     # Cadência aleatória (ex.: 3 a cada 60s) tem prioridade sobre o intervalo fixo.
+428:     cadencia = _parse_cadencia(WAHA_CADENCIA)
+429:     if cadencia:
+430:         envios_janela, janela = cadencia
+431:         pausas = _pausas_cadencia(total, envios_janela, janela)
+432:         print(f"Enviando para {total} lead(s), cadência {envios_janela} a cada {janela}s "
+433:               f"(intervalos aleatórios)...")
+434:     else:
+435:         pausas = [intervalo] * max(0, total - 1)
+436:         print(f"Enviando para {total} lead(s), com intervalo fixo de {intervalo}s...")
+437: 
+438:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
+439:         # Reconfere janela e teto a cada envio: cobre campanha longa que cruza
+440:         # o fim do horário permitido ou a virada do dia.
+441:         if not janela_aberta():
+442:             print(f"Janela de envio encerrada ({descrever_janela()}). "
+443:                   f"Interrompendo; os {total - i + 1} lead(s) restantes continuam "
+444:                   f"pendentes para o próximo horário.")
+445:             break
+446: 
+447:         if WAHA_LIMITE_DIA:
+448:             enviados_hoje = envios_hoje(db)
+449:             if enviados_hoje >= WAHA_LIMITE_DIA:
+450:                 print(f"Limite diário atingido ({enviados_hoje}/{WAHA_LIMITE_DIA}). "
+451:                       f"Interrompendo; os demais leads continuam pendentes.")
+452:                 break
+453: 
+454:         texto = _renderizar_mensagem(mensagem_template, lead)
+455:         lead_id = lead.get("lead_id")
+456:         telefone = lead.get("telefone")
+457:         nome = lead.get("nome")
+458:         cidade = lead.get("cidade")
+459: 
+460:         chat_id = lead.get("chat_id_waha")
+461:         if not chat_id:
+462:             # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
+463:             # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
+464:             chat_id = _resolver_chatid_waha(telefone)
+465:             if chat_id:
+466:                 db.salvar_chat_id_waha(nome, cidade, chat_id)
+467: 
+468:         if not chat_id:
+469:             db.marcar_envio(nome, cidade, "falhou")
+470:             db.salvar_log_envio(
+471:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
+472:                 mensagem=texto, erro="telefone inválido",
+473:             )
+474:             print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
+475:             continue
+476: 
+477:         try:
+478:             resposta = enviar_texto_waha(chat_id, texto)
+479:             db.marcar_envio(nome, cidade, "enviado")
+480:             db.salvar_log_envio(
+481:                 lead_id, nome, cidade, telefone, chat_id, "enviado",
+482:                 mensagem=texto, payload=resposta,
+483:             )
+484:             print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
+485:         except Exception as e:
+486:             payload_erro = None
+487:             if getattr(e, "response", None) is not None:
+488:                 try:
+489:                     payload_erro = e.response.text
+490:                 except Exception:
+491:                     payload_erro = None
+492:             erro = f"{type(e).__name__}: {e}"
+493:             db.marcar_envio(nome, cidade, "falhou")
+494:             db.salvar_log_envio(
+495:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
+496:                 mensagem=texto, payload=payload_erro, erro=erro,
+497:             )
+498:             print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
+499: 
+500:         if i < total:
+501:             time.sleep(pausas[i - 1])
+502: 
+503:     print("Campanha finalizada.")
+````
+
+## File: .gitignore
+````
+ 1: # Dados: o banco DuckDB É versionado (data/leads.duckdb).
+ 2: # Apenas artefatos transientes do DuckDB e saídas geradas ficam de fora.
+ 3: *.duckdb.wal
+ 4: *.duckdb.tmp
+ 5: *.xlsx
+ 6: *.csv
+ 7: *.log
+ 8: 
+ 9: # Segredos e configuração local (contém a API key da WAHA)
+10: .env
+11: 
+12: # Sessões do WhatsApp (WAHA)
+13: sessions/
+14: 
+15: # Ambientes Virtuais
+16: venv/
+17: env/
+18: .venv/
+19: 
+20: # Python Cache
+21: __pycache__/
+22: *.py[cod]
+23: *$py.class
+24: 
+25: # Configurações de IDE
+26: .vscode/
+27: .idea/
+28: 
+29: # Sistema Operacional
+30: .DS_Store
+31: Thumbs.db
+32: 
+33: # Arquivos compactados
+34: *.zip
+````
+
 ## File: src/main.py
 ````python
   1: # src/main.py
@@ -3915,323 +4170,350 @@ requirements.txt
  20: from src.whatsapp import (
  21:     disparar_campanha,
  22:     enviar_texto_numero,
- 23:     WAHA_INTERVALO,
- 24:     WAHA_LIMITE,
- 25:     WAHA_ATIVO,
- 26:     SOMENTE_ENVIO,
- 27: )
- 28: 
- 29: 
- 30: def coletar_leads():
- 31:     df_estados = obter_estados()
- 32:     if df_estados.empty:
- 33:         return
+ 23:     aviso_fora_da_janela,
+ 24:     descrever_janela,
+ 25:     janela_aberta,
+ 26:     resumo_limite_dia,
+ 27:     WAHA_INTERVALO,
+ 28:     WAHA_LIMITE,
+ 29:     WAHA_LIMITE_DIA,
+ 30:     WAHA_ATIVO,
+ 31:     SOMENTE_ENVIO,
+ 32: )
+ 33: 
  34: 
- 35:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
- 36:     if uf_escolhida not in df_estados['uf'].values:
- 37:         print("UF inválida.")
+ 35: def coletar_leads():
+ 36:     df_estados = obter_estados()
+ 37:     if df_estados.empty:
  38:         return
  39: 
- 40:     cidades = obter_cidades(uf_escolhida)
- 41:     termo_cidade = input("Digite o nome da cidade: ").strip()
- 42:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
- 43: 
- 44:     if not cidades_filtradas:
- 45:         print("Cidade não encontrada.")
- 46:         return
- 47:     elif len(cidades_filtradas) > 1:
- 48:         cidade_escolhida = input(
- 49:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
- 50:         ).strip()
- 51:         exatos = filtrar_cidades(cidades, cidade_escolhida)
- 52:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
- 53:     else:
- 54:         cidade_escolhida = cidades_filtradas[0]
- 55: 
- 56:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
- 57:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
- 58:     if municipio:
- 59:         cidade_escolhida = municipio["nome"]
- 60:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
- 61:     else:
- 62:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
- 63: 
- 64:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
- 65: 
- 66:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
- 67: 
- 68:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
- 69: 
- 70:     print("\nIniciando extração...")
- 71:     db = LeadDatabase()
+ 40:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+ 41:     if uf_escolhida not in df_estados['uf'].values:
+ 42:         print("UF inválida.")
+ 43:         return
+ 44: 
+ 45:     cidades = obter_cidades(uf_escolhida)
+ 46:     termo_cidade = input("Digite o nome da cidade: ").strip()
+ 47:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
+ 48: 
+ 49:     if not cidades_filtradas:
+ 50:         print("Cidade não encontrada.")
+ 51:         return
+ 52:     elif len(cidades_filtradas) > 1:
+ 53:         cidade_escolhida = input(
+ 54:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
+ 55:         ).strip()
+ 56:         exatos = filtrar_cidades(cidades, cidade_escolhida)
+ 57:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
+ 58:     else:
+ 59:         cidade_escolhida = cidades_filtradas[0]
+ 60: 
+ 61:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
+ 62:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
+ 63:     if municipio:
+ 64:         cidade_escolhida = municipio["nome"]
+ 65:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
+ 66:     else:
+ 67:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
+ 68: 
+ 69:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
+ 70: 
+ 71:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
  72: 
- 73:     df_resultados = rodar_scraper_multithread(
- 74:         nicho=nicho,
- 75:         cidade=cidade_escolhida,
- 76:         uf=uf_escolhida,
- 77:         termos_lista=termos_busca,
- 78:         mostrar_navegador=mostrar_navegador,
- 79:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
- 80:     )
- 81: 
- 82:     if not df_resultados.empty:
- 83:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
- 84:         db.export_to_excel(nicho, cidade_escolhida)
- 85:     else:
- 86:         print("Nenhum dado extraído.")
- 87: 
- 88:     db.close()
- 89: 
- 90: 
- 91: def _confirmar(texto):
- 92:     """Pergunta S/N e retorna True para respostas afirmativas."""
- 93:     return input(texto).strip().upper() in ("S", "SIM", "Y", "YES")
+ 73:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
+ 74: 
+ 75:     print("\nIniciando extração...")
+ 76:     db = LeadDatabase()
+ 77: 
+ 78:     df_resultados = rodar_scraper_multithread(
+ 79:         nicho=nicho,
+ 80:         cidade=cidade_escolhida,
+ 81:         uf=uf_escolhida,
+ 82:         termos_lista=termos_busca,
+ 83:         mostrar_navegador=mostrar_navegador,
+ 84:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
+ 85:     )
+ 86: 
+ 87:     if not df_resultados.empty:
+ 88:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
+ 89:         db.export_to_excel(nicho, cidade_escolhida)
+ 90:     else:
+ 91:         print("Nenhum dado extraído.")
+ 92: 
+ 93:     db.close()
  94: 
  95: 
- 96: def _escolher_template(templates):
- 97:     """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
- 98:     print("\nTemplates ativos:")
- 99:     for t in templates:
-100:         segmento = t.get("segmento")
-101:         sufixo = f"  [{segmento}]" if segmento else ""
-102:         print(f"  {t['id']} - {t['descricao']}{sufixo}")
-103: 
-104:     escolha = input("Escolha o template (Enter = primeiro): ").strip()
-105:     if not escolha:
-106:         return templates[0]["mensagem"]
-107: 
-108:     for t in templates:
-109:         if str(t["id"]) == escolha:
-110:             return t["mensagem"]
-111: 
-112:     print("Opção inválida. Usando o primeiro template.")
-113:     return templates[0]["mensagem"]
-114: 
-115: 
-116: def _escolher_filtros():
-117:     """Pergunta os filtros de envio; Enter = sem filtro (todos os leads)."""
-118:     print("\n=== FILTROS DE ENVIO ===")
-119:     print("0 - Todos (sem filtro)")
-120:     print("1 - Por número")
-121:     print("2 - Por cidade")
-122:     print("3 - Por nicho")
-123:     opcao = input("Escolha um filtro (Enter = 0): ").strip() or "0"
-124: 
-125:     numero = cidade = nicho = None
-126:     if opcao == "1":
-127:         numero = input("Número (completo ou parte): ").strip() or None
-128:     elif opcao == "2":
-129:         cidade = input("Cidade: ").strip() or None
-130:     elif opcao == "3":
-131:         nicho = input("Nicho: ").strip() or None
-132:     elif opcao != "0":
-133:         print("Opção inválida. Usando 'Todos'.")
-134:     return numero, cidade, nicho
-135: 
-136: 
-137: def testar_envio(db, mensagem, pendentes=None):
-138:     """Envia um teste para um número digitado ou para um lead pendente.
-139: 
-140:     `pendentes` (opcional): DataFrame já filtrado; se None, busca até 10 pendentes.
-141:     """
-142:     print("\n--- TESTE DE ENVIO ---")
-143:     print("1 - Digitar um número de teste")
-144:     print("2 - Escolher um lead pendente")
-145:     opcao = input("Escolha: ").strip()
-146: 
-147:     numero = None
-148:     if opcao == "1":
-149:         numero = input("Digite o número com DDD (ex: 51999998888): ").strip()
-150:     elif opcao == "2":
-151:         if pendentes is None:
-152:             pendentes = db.get_leads_para_envio(limite=10)
-153:         if pendentes.empty:
-154:             print("Nenhum lead pendente para testar.")
-155:             return
-156:         amostra = pendentes.head(10)
-157:         print("Leads pendentes:")
-158:         for i, (_, lead) in enumerate(amostra.iterrows(), 1):
-159:             print(f"  {i} - {lead['nome']} ({lead['telefone']})")
-160:         escolha = input("Escolha o número do lead: ").strip()
-161:         if not escolha.isdigit() or not (1 <= int(escolha) <= len(amostra)):
-162:             print("Escolha inválida.")
-163:             return
-164:         numero = amostra.iloc[int(escolha) - 1]["telefone"]
-165:     else:
-166:         print("Opção inválida.")
-167:         return
-168: 
-169:     if not numero:
-170:         print("Nenhum número informado.")
-171:         return
-172: 
-173:     try:
-174:         enviar_texto_numero(numero, mensagem)
-175:         print(f"✅ Teste enviado para {numero}")
-176:     except Exception as e:
-177:         print(f"❌ Falha no teste para {numero}: {e}")
-178: 
-179: 
-180: def enviar_whatsapp_menu():
-181:     print("\n=== ENVIO WHATSAPP (WAHA) ===")
-182: 
-183:     if not WAHA_ATIVO:
-184:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
-185:         return
-186: 
-187:     db = LeadDatabase()
-188: 
-189:     templates = db.listar_templates_ativos()
-190:     if not templates:
-191:         print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
-192:         db.close()
-193:         return
-194: 
-195:     mensagem = _escolher_template(templates)
-196: 
-197:     numero_f, cidade_f, nicho_f = _escolher_filtros()
-198: 
-199:     # Busca todos os pendentes (sem limitar ainda) para mostrar o total disponível.
-200:     pendentes = db.get_leads_para_envio(numero=numero_f, cidade=cidade_f, nicho=nicho_f)
+ 96: def _confirmar(texto):
+ 97:     """Pergunta S/N e retorna True para respostas afirmativas."""
+ 98:     return input(texto).strip().upper() in ("S", "SIM", "Y", "YES")
+ 99: 
+100: 
+101: def _escolher_template(templates):
+102:     """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
+103:     print("\nTemplates ativos:")
+104:     for t in templates:
+105:         segmento = t.get("segmento")
+106:         sufixo = f"  [{segmento}]" if segmento else ""
+107:         print(f"  {t['id']} - {t['descricao']}{sufixo}")
+108: 
+109:     escolha = input("Escolha o template (Enter = primeiro): ").strip()
+110:     if not escolha:
+111:         return templates[0]["mensagem"]
+112: 
+113:     for t in templates:
+114:         if str(t["id"]) == escolha:
+115:             return t["mensagem"]
+116: 
+117:     print("Opção inválida. Usando o primeiro template.")
+118:     return templates[0]["mensagem"]
+119: 
+120: 
+121: def _escolher_filtros():
+122:     """Pergunta os filtros de envio; Enter = sem filtro (todos os leads)."""
+123:     print("\n=== FILTROS DE ENVIO ===")
+124:     print("0 - Todos (sem filtro)")
+125:     print("1 - Por número")
+126:     print("2 - Por cidade")
+127:     print("3 - Por nicho")
+128:     opcao = input("Escolha um filtro (Enter = 0): ").strip() or "0"
+129: 
+130:     numero = cidade = nicho = None
+131:     if opcao == "1":
+132:         numero = input("Número (completo ou parte): ").strip() or None
+133:     elif opcao == "2":
+134:         cidade = input("Cidade: ").strip() or None
+135:     elif opcao == "3":
+136:         nicho = input("Nicho: ").strip() or None
+137:     elif opcao != "0":
+138:         print("Opção inválida. Usando 'Todos'.")
+139:     return numero, cidade, nicho
+140: 
+141: 
+142: def testar_envio(db, mensagem, pendentes=None):
+143:     """Envia um teste para um número digitado ou para um lead pendente.
+144: 
+145:     `pendentes` (opcional): DataFrame já filtrado; se None, busca até 10 pendentes.
+146:     """
+147:     print("\n--- TESTE DE ENVIO ---")
+148:     print("1 - Digitar um número de teste")
+149:     print("2 - Escolher um lead pendente")
+150:     opcao = input("Escolha: ").strip()
+151: 
+152:     numero = None
+153:     if opcao == "1":
+154:         numero = input("Digite o número com DDD (ex: 51999998888): ").strip()
+155:     elif opcao == "2":
+156:         if pendentes is None:
+157:             pendentes = db.get_leads_para_envio(limite=10)
+158:         if pendentes.empty:
+159:             print("Nenhum lead pendente para testar.")
+160:             return
+161:         amostra = pendentes.head(10)
+162:         print("Leads pendentes:")
+163:         for i, (_, lead) in enumerate(amostra.iterrows(), 1):
+164:             print(f"  {i} - {lead['nome']} ({lead['telefone']})")
+165:         escolha = input("Escolha o número do lead: ").strip()
+166:         if not escolha.isdigit() or not (1 <= int(escolha) <= len(amostra)):
+167:             print("Escolha inválida.")
+168:             return
+169:         numero = amostra.iloc[int(escolha) - 1]["telefone"]
+170:     else:
+171:         print("Opção inválida.")
+172:         return
+173: 
+174:     if not numero:
+175:         print("Nenhum número informado.")
+176:         return
+177: 
+178:     try:
+179:         enviar_texto_numero(numero, mensagem)
+180:         print(f"✅ Teste enviado para {numero}")
+181:     except Exception as e:
+182:         print(f"❌ Falha no teste para {numero}: {e}")
+183: 
+184: 
+185: def enviar_whatsapp_menu():
+186:     print("\n=== ENVIO WHATSAPP (WAHA) ===")
+187: 
+188:     if not WAHA_ATIVO:
+189:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
+190:         return
+191: 
+192:     db = LeadDatabase()
+193: 
+194:     templates = db.listar_templates_ativos()
+195:     if not templates:
+196:         print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
+197:         db.close()
+198:         return
+199: 
+200:     mensagem = _escolher_template(templates)
 201: 
-202:     if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
-203:         testar_envio(db, mensagem, pendentes=pendentes)
-204: 
-205:     if pendentes.empty:
-206:         print("Nenhum lead celular pendente de envio (com os filtros aplicados).")
-207:         db.close()
-208:         return
-209: 
-210:     total_disponivel = len(pendentes)
-211:     print(f"\n{total_disponivel} lead(s) celular(es) pendentes (fixos são ignorados).")
-212: 
-213:     # Quantidade (range): Enter = todos (respeitando o limite do .env, se houver).
-214:     if WAHA_LIMITE:
-215:         print(f"Limite configurado no .env: {WAHA_LIMITE} lead(s) por campanha.")
-216:         padrao = WAHA_LIMITE
-217:     else:
-218:         padrao = total_disponivel
-219: 
-220:     entrada = input(
-221:         f"Quantos leads enviar? (Enter = {padrao}): "
-222:     ).strip()
+202:     # Fora do horário permitido não dá para enviar (nem teste).
+203:     if not janela_aberta():
+204:         aviso_fora_da_janela()
+205:         db.close()
+206:         return
+207: 
+208:     # Teto diário: mostra o consumo e bloqueia quando esgotado.
+209:     enviados_hoje, restante_dia = resumo_limite_dia(db)
+210:     if restante_dia is not None:
+211:         print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} enviados. "
+212:               f"Restam {restante_dia}.")
+213:         if restante_dia <= 0:
+214:             print(f"Limite diário atingido. Os envios voltam na próxima janela "
+215:                   f"({descrever_janela()}).")
+216:             db.close()
+217:             return
+218: 
+219:     numero_f, cidade_f, nicho_f = _escolher_filtros()
+220: 
+221:     # Busca todos os pendentes (sem limitar ainda) para mostrar o total disponível.
+222:     pendentes = db.get_leads_para_envio(numero=numero_f, cidade=cidade_f, nicho=nicho_f)
 223: 
-224:     if entrada:
-225:         if entrada.isdigit() and int(entrada) > 0:
-226:             quantidade = int(entrada)
-227:         else:
-228:             print("Valor inválido. Usando o padrão.")
-229:             quantidade = padrao
-230:     else:
-231:         quantidade = padrao
-232: 
-233:     if WAHA_LIMITE and quantidade > WAHA_LIMITE:
-234:         print(f"Ajustando para o limite do .env ({WAHA_LIMITE}).")
-235:         quantidade = WAHA_LIMITE
-236: 
-237:     quantidade = min(quantidade, total_disponivel)
-238:     pendentes = pendentes.head(quantidade)
-239: 
-240:     if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
-241:         print("Envio cancelado.")
-242:         db.close()
-243:         return
-244: 
-245:     disparar_campanha(
-246:         db,
-247:         mensagem_template=mensagem,
-248:         intervalo=WAHA_INTERVALO,
-249:         limite=quantidade,
-250:         leads=pendentes,
-251:     )
-252:     db.close()
-253: 
-254: 
-255: def aquecer_bairros_menu():
-256:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
-257:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
-258: 
-259:     if not LOCALIDADES_SALVAR:
-260:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
-261:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
-262:         return
+224:     if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
+225:         testar_envio(db, mensagem, pendentes=pendentes)
+226: 
+227:     if pendentes.empty:
+228:         print("Nenhum lead celular pendente de envio (com os filtros aplicados).")
+229:         db.close()
+230:         return
+231: 
+232:     total_disponivel = len(pendentes)
+233:     print(f"\n{total_disponivel} lead(s) celular(es) pendentes (fixos são ignorados).")
+234: 
+235:     # Quantidade (range): Enter = todos (respeitando os limites do .env).
+236:     padrao = total_disponivel
+237:     if WAHA_LIMITE:
+238:         print(f"Limite configurado no .env: {WAHA_LIMITE} lead(s) por campanha.")
+239:         padrao = min(padrao, WAHA_LIMITE)
+240:     if restante_dia is not None:
+241:         padrao = min(padrao, restante_dia)
+242: 
+243:     entrada = input(
+244:         f"Quantos leads enviar? (Enter = {padrao}): "
+245:     ).strip()
+246: 
+247:     if entrada:
+248:         if entrada.isdigit() and int(entrada) > 0:
+249:             quantidade = int(entrada)
+250:         else:
+251:             print("Valor inválido. Usando o padrão.")
+252:             quantidade = padrao
+253:     else:
+254:         quantidade = padrao
+255: 
+256:     if WAHA_LIMITE and quantidade > WAHA_LIMITE:
+257:         print(f"Ajustando para o limite do .env ({WAHA_LIMITE}).")
+258:         quantidade = WAHA_LIMITE
+259: 
+260:     if restante_dia is not None and quantidade > restante_dia:
+261:         print(f"Ajustando ao limite diário restante ({restante_dia}).")
+262:         quantidade = restante_dia
 263: 
-264:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
-265:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
+264:     quantidade = min(quantidade, total_disponivel)
+265:     pendentes = pendentes.head(quantidade)
 266: 
-267:     df_estados = obter_estados()
-268:     if df_estados.empty:
-269:         print("Não foi possível obter a lista de estados.")
+267:     if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
+268:         print("Envio cancelado.")
+269:         db.close()
 270:         return
 271: 
-272:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
-273:     if uf not in df_estados['uf'].values:
-274:         print("UF inválida.")
-275:         return
-276: 
-277:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
-278:     pendentes = listar_municipios_pendentes(uf)
-279:     if not pendentes:
-280:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
-281:         return
-282: 
-283:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
-284:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
-285:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
-286: 
-287:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
-288:     max_cidades = 0
-289:     if limite:
-290:         try:
-291:             max_cidades = max(1, int(limite))
-292:         except ValueError:
-293:             print("Valor inválido. Usando todas.")
-294:             max_cidades = 0
-295: 
-296:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
-297:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
-298:     if confirmar != 'S':
-299:         print("Operação cancelada.")
-300:         return
-301: 
-302:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
+272:     disparar_campanha(
+273:         db,
+274:         mensagem_template=mensagem,
+275:         intervalo=WAHA_INTERVALO,
+276:         limite=quantidade,
+277:         leads=pendentes,
+278:     )
+279:     db.close()
+280: 
+281: 
+282: def aquecer_bairros_menu():
+283:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
+284:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
+285: 
+286:     if not LOCALIDADES_SALVAR:
+287:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
+288:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
+289:         return
+290: 
+291:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
+292:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
+293: 
+294:     df_estados = obter_estados()
+295:     if df_estados.empty:
+296:         print("Não foi possível obter a lista de estados.")
+297:         return
+298: 
+299:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+300:     if uf not in df_estados['uf'].values:
+301:         print("UF inválida.")
+302:         return
 303: 
-304: 
-305: def menu_interativo():
-306:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
-307:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
-308:     so_enviar_cli = "--so-enviar" in sys.argv
+304:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
+305:     pendentes = listar_municipios_pendentes(uf)
+306:     if not pendentes:
+307:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
+308:         return
 309: 
-310:     if SOMENTE_ENVIO or so_enviar_cli:
-311:         enviar_whatsapp_menu()
-312:         return
+310:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
+311:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
+312:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
 313: 
-314:     while True:
-315:         print("\n=== MAP SCRAPER ===")
-316:         print("1 - Coletar leads")
-317:         print("2 - Enviar mensagens WhatsApp")
-318:         print("3 - Sincronizar base de localidades (IBGE)")
-319:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
-320:         print("5 - Sair")
-321:         opcao = input("Escolha uma opção: ").strip()
+314:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
+315:     max_cidades = 0
+316:     if limite:
+317:         try:
+318:             max_cidades = max(1, int(limite))
+319:         except ValueError:
+320:             print("Valor inválido. Usando todas.")
+321:             max_cidades = 0
 322: 
-323:         if opcao == "1":
-324:             coletar_leads()
-325:         elif opcao == "2":
-326:             enviar_whatsapp_menu()
-327:         elif opcao == "3":
-328:             sincronizar_base_localidades()
-329:         elif opcao == "4":
-330:             aquecer_bairros_menu()
-331:         elif opcao == "5":
-332:             print("Até mais!")
-333:             break
-334:         else:
-335:             print("Opção inválida.")
+323:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
+324:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
+325:     if confirmar != 'S':
+326:         print("Operação cancelada.")
+327:         return
+328: 
+329:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
+330: 
+331: 
+332: def menu_interativo():
+333:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
+334:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
+335:     so_enviar_cli = "--so-enviar" in sys.argv
 336: 
-337: 
-338: if __name__ == "__main__":
-339:     menu_interativo()
+337:     if SOMENTE_ENVIO or so_enviar_cli:
+338:         enviar_whatsapp_menu()
+339:         return
+340: 
+341:     while True:
+342:         print("\n=== MAP SCRAPER ===")
+343:         print("1 - Coletar leads")
+344:         print("2 - Enviar mensagens WhatsApp")
+345:         print("3 - Sincronizar base de localidades (IBGE)")
+346:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
+347:         print("5 - Sair")
+348:         opcao = input("Escolha uma opção: ").strip()
+349: 
+350:         if opcao == "1":
+351:             coletar_leads()
+352:         elif opcao == "2":
+353:             enviar_whatsapp_menu()
+354:         elif opcao == "3":
+355:             sincronizar_base_localidades()
+356:         elif opcao == "4":
+357:             aquecer_bairros_menu()
+358:         elif opcao == "5":
+359:             print("Até mais!")
+360:             break
+361:         else:
+362:             print("Opção inválida.")
+363: 
+364: 
+365: if __name__ == "__main__":
+366:     menu_interativo()
 ````
 
 ## File: README.md
@@ -4411,342 +4693,395 @@ requirements.txt
 173:     WAHA_ATIVO=true
 174:     SOMENTE_ENVIO=false
 175:     WAHA_INTERVALO=13
-176:     WAHA_LIMITE=
-177:     ```
-178: 
-179:     Flags de comportamento:
-180:     - WAHA_ATIVO: se false, desliga o envio de WhatsApp (não tenta enviar).
-181:     - SOMENTE_ENVIO: se true, pula a coleta e vai direto para o envio
-182:       (equivalente a rodar `python src/main.py --so-enviar`).
-183:     - WAHA_LIMITE: quantidade máxima de leads por campanha (vazio = sem limite).
-184: 
-185:     Regras de envio (evita spam):
-186:     - Só envia para leads com status = 'ativo'.
-187:     - Só envia para tipo_telefone = 'Celular' (fixos são ignorados).
-188:     - Só envia para leads ainda não enviados (status_whatsapp = 'pendente' ou NULL).
-189:     - Intervalo de WAHA_INTERVALO segundos entre envios.
-190: 
-191:     Logs no banco:
-192:     - status_whatsapp: 'pendente', 'enviado' ou 'falhou'.
-193:     - data_envio_whatsapp: gravada apenas quando o envio é bem-sucedido.
-194: 
-195:     A mensagem pode usar as variáveis {nome}, {bairro} e {cidade}.
-196: 
+176:     WAHA_CADENCIA=3:60
+177:     WAHA_JANELA_ENVIO=08:00-19:00
+178:     WAHA_LIMITE=
+179:     WAHA_LIMITE_DIA=150
+180:     ```
+181: 
+182:     Flags de comportamento:
+183:     - WAHA_ATIVO: se false, desliga o envio de WhatsApp (não tenta enviar).
+184:     - SOMENTE_ENVIO: se true, pula a coleta e vai direto para o envio
+185:       (equivalente a rodar `python src/main.py --so-enviar`).
+186: 
+187:     Os quatro controles abaixo são independentes — não confunda:
+188:     - WAHA_CADENCIA (ritmo): "X a cada Y segundos". `3:60` = 3 mensagens por
+189:       minuto, com intervalos aleatórios. Vazio = usa WAHA_INTERVALO (pausa fixa
+190:       de 13s).
+191:     - WAHA_JANELA_ENVIO (horário): "INÍCIO-FIM". `08:00-19:00` = só no horário
+192:       comercial. Vazio = a qualquer hora. Aceita travessia de meia-noite
+193:       (`22:00-06:00`). Formato curto também vale (`8-19`).
+194:     - WAHA_LIMITE (campanha): máximo de leads por execução do envio.
+195:     - WAHA_LIMITE_DIA (dia): máximo de mensagens por dia, somando todas as
+196:       campanhas. Vazio/0 = sem teto diário.
 197: 
-198: 8. Base de Localidades Offline (IBGE)
-199: 
-200:     O projeto mantém um cache local das localidades no próprio DuckDB, criado na
-201:     primeira consulta e reaproveitado nas seguintes (sem rede).
-202: 
-203:     Tabelas criadas automaticamente (guardam apenas o essencial):
-204:     - localidades_estados: uf, nome
-205:     - localidades_municipios: id_municipio, nome, uf + estado da coleta de bairros
-206:     - localidades_bairros: id_municipio, nome, id_distrito
-207: 
-208:     Fontes (API de Localidades do IBGE):
-209:     - Estados:    https://servicodados.ibge.gov.br/api/v1/localidades/estados
-210:     - Municípios: https://servicodados.ibge.gov.br/api/v1/localidades/municipios
-211:     - Distritos:  https://servicodados.ibge.gov.br/api/v1/localidades/distritos
-212: 
-213:     Configuração (.env):
-214:     ```
-215:     LOCALIDADES_USAR_CACHE=true
-216:     LOCALIDADES_SALVAR=true
-217:     LOCALIDADES_MIN_BAIRROS=3
-218:     AQUECER_PAUSA_SEGUNDOS=2
-219:     ```
-220: 
-221:     - LOCALIDADES_USAR_CACHE=true (padrão): consulta o banco primeiro e só chama a
-222:       API quando o dado ainda não existe (e aí grava o resultado).
-223:     - LOCALIDADES_USAR_CACHE=false: sempre busca na API do IBGE e atualiza a base
-224:       local com o que voltou.
-225:     - LOCALIDADES_SALVAR=false: modo somente leitura. Nada é gravado e nem as
-226:       tabelas são criadas; o banco só é consultado. A sincronização do menu fica
-227:       desativada.
-228:     - LOCALIDADES_MIN_BAIRROS: mínimo de distritos do IBGE para a cidade ser
-229:       considerada coberta. Abaixo disso, os bairros são complementados com o
-230:       OpenStreetMap (Nominatim + Overpass) e o resultado também fica em cache.
-231:     - AQUECER_PAUSA_SEGUNDOS: pausa entre cidades no aquecimento por UF, aplicada
-232:       somente quando a cidade usou o OpenStreetMap.
-233: 
-234:     As duas flags são independentes:
-235: 
-236:     | USAR_CACHE | SALVAR | Comportamento |
-237:     |---|---|---|
-238:     | true  | true  | lê do banco; grava o que faltar (recomendado) |
-239:     | false | true  | sempre vai à API e regrava tudo (força atualização) |
-240:     | true  | false | só lê o banco; o que não existe vai à API sem gravar |
-241:     | false | false | sempre à API, sem tocar no banco |
+198:     Exemplo: `WAHA_CADENCIA=3:60` + `WAHA_JANELA_ENVIO=08:00-19:00` +
+199:     `WAHA_LIMITE_DIA=150` = 3 por minuto, apenas entre 8h e 19h, parando quando o
+200:     dia chegar a 150 envios. Os demais leads ficam pendentes para o dia
+201:     seguinte. Rodar de novo no mesmo dia não fura o teto: o contador vem do log
+202:     no banco, não da memória do processo.
+203: 
+204:     Como a janela se comporta:
+205:     - Fora dela, o menu avisa e não envia nada (nem o teste) e mostra quando
+206:       reabre (ex.: "Próximo envio a partir de 03/11 às 08:00").
+207:     - Campanha que chega no fim da janela é interrompida no meio; os leads
+208:       restantes continuam pendentes para o próximo horário.
+209:     - O teto diário renova na **abertura da janela** (às 08:00 no exemplo), não
+210:       à meia-noite.
+211:     - Janela inválida (ex.: `25:00-19:00`) gera aviso e o envio fica liberado
+212:       24h, para não travar a operação por erro de digitação.
+213: 
+214:     Observação: o envio de **teste** (antes da campanha) não é registrado no
+215:     log, então não consome o teto diário.
+216: 
+217:     Regras de envio (evita spam):
+218:     - Só envia para leads com status = 'ativo'.
+219:     - Só envia para tipo_telefone = 'Celular' (fixos são ignorados).
+220:     - Só envia para leads ainda não enviados (status_whatsapp = 'pendente' ou NULL).
+221:     - Intervalo de WAHA_INTERVALO segundos entre envios (se não houver cadência).
+222: 
+223:     Logs no banco:
+224:     - status_whatsapp: 'pendente', 'enviado' ou 'falhou'.
+225:     - data_envio_whatsapp: gravada apenas quando o envio é bem-sucedido.
+226:     - whatsapp_envios_log: uma linha por tentativa, com data_envio. É a fonte
+227:       usada para contar o teto diário (só status = 'enviado' conta).
+228: 
+229:     Consultar o consumo do dia:
+230:     ```sql
+231:     SELECT COUNT(*) FROM whatsapp_envios_log
+232:     WHERE status = 'enviado' AND data_envio >= CURRENT_DATE;
+233:     ```
+234: 
+235:     A mensagem pode usar as variáveis {nome}, {bairro} e {cidade}.
+236: 
+237: 
+238: 8. Base de Localidades Offline (IBGE)
+239: 
+240:     O projeto mantém um cache local das localidades no próprio DuckDB, criado na
+241:     primeira consulta e reaproveitado nas seguintes (sem rede).
 242: 
-243:     O que acontece ao rodar de novo para a mesma cidade:
-244: 
-245:     - localidades_estados: UPSERT por uf (só atualiza o nome).
-246:     - localidades_municipios: UPSERT por id_municipio (atualiza nome/uf e
-247:       PRESERVA bairros_fonte / bairros_atualizado_em).
-248:     - localidades_bairros: a lista da cidade é tratada como autoritativa. Nomes
-249:       iguais são atualizados, nomes novos são inseridos e nomes que não vieram mais
-250:       são removidos — mas apenas daquela cidade.
-251:     - Sincronização completa (menu opção 3): aditiva. Ela insere/atualiza os
-252:       distritos do IBGE sem apagar bairros que já existem, então listas
-253:       complementadas pelo OpenStreetMap são preservadas.
-254: 
-255:     Rodar só para um estado também é seguro: obter_cidades(uf) grava apenas os
-256:     municípios daquela UF, e nada de outras UFs é alterado.
-257: 
-258:     Sincronização completa: menu opção 3 (ou `sincronizar_base_localidades()`), que
-259:     baixa de uma vez todos os estados, municípios e distritos (~10,7 mil registros).
+243:     Tabelas criadas automaticamente (guardam apenas o essencial):
+244:     - localidades_estados: uf, nome
+245:     - localidades_municipios: id_municipio, nome, uf + estado da coleta de bairros
+246:     - localidades_bairros: id_municipio, nome, id_distrito
+247: 
+248:     Fontes (API de Localidades do IBGE):
+249:     - Estados:    https://servicodados.ibge.gov.br/api/v1/localidades/estados
+250:     - Municípios: https://servicodados.ibge.gov.br/api/v1/localidades/municipios
+251:     - Distritos:  https://servicodados.ibge.gov.br/api/v1/localidades/distritos
+252: 
+253:     Configuração (.env):
+254:     ```
+255:     LOCALIDADES_USAR_CACHE=true
+256:     LOCALIDADES_SALVAR=true
+257:     LOCALIDADES_MIN_BAIRROS=3
+258:     AQUECER_PAUSA_SEGUNDOS=2
+259:     ```
 260: 
-261:     Aquecimento por UF: menu opção 4 (ou `aquecer_bairros_uf('RS')`). Resolve e
-262:     grava os bairros de TODAS as cidades de um estado, sem raspar nenhum lead.
-263:     Depois disso, a coleta por cidade não consulta mais IBGE/OSM.
-264: 
-265:     - Processa apenas as cidades com `bairros_fonte IS NULL` (ou seja, retoma de
-266:       onde parou em execuções anteriores).
-267:     - Cidades cobertas pelo IBGE são instantâneas; as demais usam o OpenStreetMap.
-268:     - A pausa entre cidades (AQUECER_PAUSA_SEGUNDOS) é aplicada somente quando o
-269:       OSM foi consultado — respeitando o limite de 1 req/s do Nominatim.
-270:     - Ctrl+C interrompe sem perder o que já foi gravado; basta rodar de novo.
-271:     - É possível limitar quantas cidades processar por execução.
-272: 
-273:     Importante: os "distritos" do IBGE são divisões administrativas e, em muitos
-274:     municípios, resumem-se à própria sede. Por isso o fallback com o OSM continua
-275:     existindo — a diferença é que ele roda uma única vez por cidade e o resultado
-276:     é gravado no banco. Se o OSM estiver fora do ar, nada é gravado (a próxima
-277:     execução tenta de novo) e a coleta segue com os distritos do IBGE.
-278: 
-279:     A API de Localidades do IBGE NÃO fornece bairros — apenas distritos e
-280:     subdistritos. Exemplo real: Canoas-RS tem 1 distrito (a própria sede) e 0
-281:     subdistritos, então o IBGE não contribui com áreas para essa cidade e o robô
-282:     informa isso e segue para o OpenStreetMap:
-283: 
-284:     ```
-285:     IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).
-286:     Buscando bairros no OpenStreetMap...
-287:     ```
-288: 
-289:     Cidades com vários distritos (São Paulo: 96, Campinas: 7) usam o IBGE e não
-290:     consultam o OSM. Das 5.571 cidades do país, 643 têm distritos suficientes.
-291: 
-292:     Como a cidade é resolvida: o nome digitado é comparado sem acento e sem
-293:     diferenciar maiúsculas ("canoas", "sao leopoldo") com a lista do IBGE, e o nome
-294:     oficial é exibido e usado no scraping, no banco e no Excel:
-295: 
-296:     ```
-297:     Digite o nome da cidade: canoas
-298:     Município (IBGE): Canoas-RS | código 4304606
-299:     ```
+261:     - LOCALIDADES_USAR_CACHE=true (padrão): consulta o banco primeiro e só chama a
+262:       API quando o dado ainda não existe (e aí grava o resultado).
+263:     - LOCALIDADES_USAR_CACHE=false: sempre busca na API do IBGE e atualiza a base
+264:       local com o que voltou.
+265:     - LOCALIDADES_SALVAR=false: modo somente leitura. Nada é gravado e nem as
+266:       tabelas são criadas; o banco só é consultado. A sincronização do menu fica
+267:       desativada.
+268:     - LOCALIDADES_MIN_BAIRROS: mínimo de distritos do IBGE para a cidade ser
+269:       considerada coberta. Abaixo disso, os bairros são complementados com o
+270:       OpenStreetMap (Nominatim + Overpass) e o resultado também fica em cache.
+271:     - AQUECER_PAUSA_SEGUNDOS: pausa entre cidades no aquecimento por UF, aplicada
+272:       somente quando a cidade usou o OpenStreetMap.
+273: 
+274:     As duas flags são independentes:
+275: 
+276:     | USAR_CACHE | SALVAR | Comportamento |
+277:     |---|---|---|
+278:     | true  | true  | lê do banco; grava o que faltar (recomendado) |
+279:     | false | true  | sempre vai à API e regrava tudo (força atualização) |
+280:     | true  | false | só lê o banco; o que não existe vai à API sem gravar |
+281:     | false | false | sempre à API, sem tocar no banco |
+282: 
+283:     O que acontece ao rodar de novo para a mesma cidade:
+284: 
+285:     - localidades_estados: UPSERT por uf (só atualiza o nome).
+286:     - localidades_municipios: UPSERT por id_municipio (atualiza nome/uf e
+287:       PRESERVA bairros_fonte / bairros_atualizado_em).
+288:     - localidades_bairros: a lista da cidade é tratada como autoritativa. Nomes
+289:       iguais são atualizados, nomes novos são inseridos e nomes que não vieram mais
+290:       são removidos — mas apenas daquela cidade.
+291:     - Sincronização completa (menu opção 3): aditiva. Ela insere/atualiza os
+292:       distritos do IBGE sem apagar bairros que já existem, então listas
+293:       complementadas pelo OpenStreetMap são preservadas.
+294: 
+295:     Rodar só para um estado também é seguro: obter_cidades(uf) grava apenas os
+296:     municípios daquela UF, e nada de outras UFs é alterado.
+297: 
+298:     Sincronização completa: menu opção 3 (ou `sincronizar_base_localidades()`), que
+299:     baixa de uma vez todos os estados, municípios e distritos (~10,7 mil registros).
 300: 
-301:     Para forçar a atualização de uma cidade já gravada, limpe a marca:
-302:     ```sql
-303:     UPDATE localidades_municipios SET bairros_fonte = NULL WHERE nome = 'Porto Alegre';
-304:     ```
-305: 
-306: 9. Anti-bloqueio / Captcha (Google Maps)
-307: 
-308:     Quando o Google responde com a tela de "tráfego incomum" (captcha), o robô:
-309:     1. detecta o bloqueio (URL /sorry/, formulários de captcha ou textos típicos);
-310:     2. aplica um cooldown global, pausando TODAS as threads ao mesmo tempo;
-311:     3. espera a pausa longa e tenta novamente até CAPTCHA_MAX_TENTATIVAS;
-312:     4. se o bloqueio persistir, aborta apenas aquela área, preservando os leads
-313:        já extraídos (que continuam sendo salvos incrementalmente).
-314: 
-315:     Configuração (.env):
-316:     ```
-317:     CAPTCHA_MAX_TENTATIVAS=2
-318:     CAPTCHA_PAUSA_SEGUNDOS=300
-319:     CAPTCHA_PAUSA_GLOBAL_SEGUNDOS=180
-320:     ```
-321: 
-322:     - CAPTCHA_MAX_TENTATIVAS: tentativas por página antes de abortar a área.
-323:     - CAPTCHA_PAUSA_SEGUNDOS: pausa longa da thread que levou o bloqueio.
-324:     - CAPTCHA_PAUSA_GLOBAL_SEGUNDOS: pausa compartilhada entre as threads.
-325: 
-326:     A resolução automática de captcha por serviço externo (2Captcha, CapMonster
-327:     etc.) não está implementada — o comportamento padrão é pausar e desistir da
-328:     área em vez de insistir. Em coletas muito grandes, aumente as pausas acima.
-329: 
-330: 10. commit forçado
+301:     Aquecimento por UF: menu opção 4 (ou `aquecer_bairros_uf('RS')`). Resolve e
+302:     grava os bairros de TODAS as cidades de um estado, sem raspar nenhum lead.
+303:     Depois disso, a coleta por cidade não consulta mais IBGE/OSM.
+304: 
+305:     - Processa apenas as cidades com `bairros_fonte IS NULL` (ou seja, retoma de
+306:       onde parou em execuções anteriores).
+307:     - Cidades cobertas pelo IBGE são instantâneas; as demais usam o OpenStreetMap.
+308:     - A pausa entre cidades (AQUECER_PAUSA_SEGUNDOS) é aplicada somente quando o
+309:       OSM foi consultado — respeitando o limite de 1 req/s do Nominatim.
+310:     - Ctrl+C interrompe sem perder o que já foi gravado; basta rodar de novo.
+311:     - É possível limitar quantas cidades processar por execução.
+312: 
+313:     Importante: os "distritos" do IBGE são divisões administrativas e, em muitos
+314:     municípios, resumem-se à própria sede. Por isso o fallback com o OSM continua
+315:     existindo — a diferença é que ele roda uma única vez por cidade e o resultado
+316:     é gravado no banco. Se o OSM estiver fora do ar, nada é gravado (a próxima
+317:     execução tenta de novo) e a coleta segue com os distritos do IBGE.
+318: 
+319:     A API de Localidades do IBGE NÃO fornece bairros — apenas distritos e
+320:     subdistritos. Exemplo real: Canoas-RS tem 1 distrito (a própria sede) e 0
+321:     subdistritos, então o IBGE não contribui com áreas para essa cidade e o robô
+322:     informa isso e segue para o OpenStreetMap:
+323: 
+324:     ```
+325:     IBGE não publica bairros para Canoas-RS: o município tem apenas 1 distrito (a sede).
+326:     Buscando bairros no OpenStreetMap...
+327:     ```
+328: 
+329:     Cidades com vários distritos (São Paulo: 96, Campinas: 7) usam o IBGE e não
+330:     consultam o OSM. Das 5.571 cidades do país, 643 têm distritos suficientes.
 331: 
-332:     git add -A; git commit -m "sync local $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
-333: 
-334: 11. Próximos Passos (Melhorias Futuras)
+332:     Como a cidade é resolvida: o nome digitado é comparado sem acento e sem
+333:     diferenciar maiúsculas ("canoas", "sao leopoldo") com a lista do IBGE, e o nome
+334:     oficial é exibido e usado no scraping, no banco e no Excel:
 335: 
-336:     Já implementado:
-337:     - Base de localidades offline no DuckDB (estados, municípios e distritos do IBGE).
-338:     - Detecção de captcha com pausa longa e cooldown compartilhado entre threads.
-339: 
-340:     Pendências sugeridas:
-341:     - Resolução automática de captcha: integrar um serviço (2Captcha/CapMonster) para
-342:       coletas muito grandes, hoje o robô apenas pausa e desiste da área.
-343: 
-344:     - Enriquecimento de E-mail: Criar um script secundário que lê os sites encontrados e busca e-mails de contato (usando Regex).
+336:     ```
+337:     Digite o nome da cidade: canoas
+338:     Município (IBGE): Canoas-RS | código 4304606
+339:     ```
+340: 
+341:     Para forçar a atualização de uma cidade já gravada, limpe a marca:
+342:     ```sql
+343:     UPDATE localidades_municipios SET bairros_fonte = NULL WHERE nome = 'Porto Alegre';
+344:     ```
 345: 
-346: 
-347: 12. Memória do Projeto para IA (pasta memory/)
-348: 
-349:     A pasta `memory/` reúne documentação resumida e densa, pensada para ser lida
-350:     por modelos de IA antes de alterar o código (economiza contexto/custo).
-351: 
-352:     Ordem de leitura:
-353:     1. memory/00-resumo-projeto.md        -> objetivo, stack e estrutura
-354:     2. memory/01-arquitetura-e-modulos.md -> módulos, funções e fluxos
-355:     3. memory/02-decisoes-e-armadilhas.md -> decisões, bugs conhecidos, cuidados
-356:     4. memory/03-historico-de-mudancas.md -> o que mudou e o que ficou pendente
-357:     5. memory/04-como-contribuir.md       -> padrões de código, logs, testes e docs
-358: 
-359:     Regras: manter os arquivos curtos, registrar o "porquê" das decisões e nunca
-360:     colocar segredos ali (API keys ficam apenas no `.env`).
+346: 9. Anti-bloqueio / Captcha (Google Maps)
+347: 
+348:     Quando o Google responde com a tela de "tráfego incomum" (captcha), o robô:
+349:     1. detecta o bloqueio (URL /sorry/, formulários de captcha ou textos típicos);
+350:     2. aplica um cooldown global, pausando TODAS as threads ao mesmo tempo;
+351:     3. espera a pausa longa e tenta novamente até CAPTCHA_MAX_TENTATIVAS;
+352:     4. se o bloqueio persistir, aborta apenas aquela área, preservando os leads
+353:        já extraídos (que continuam sendo salvos incrementalmente).
+354: 
+355:     Configuração (.env):
+356:     ```
+357:     CAPTCHA_MAX_TENTATIVAS=2
+358:     CAPTCHA_PAUSA_SEGUNDOS=300
+359:     CAPTCHA_PAUSA_GLOBAL_SEGUNDOS=180
+360:     ```
 361: 
-362: 
-363: 13. Observação sobre configuração
-364: 
-365:     O modelo completo e comentado de todas as variáveis está em `.env.example`.
-366:     Cada item traz a faixa de valores e o efeito colateral. Comentários devem
-367:     ficar em linha própria; comentário na mesma linha do valor é lido como parte
-368:     do valor.
+362:     - CAPTCHA_MAX_TENTATIVAS: tentativas por página antes de abortar a área.
+363:     - CAPTCHA_PAUSA_SEGUNDOS: pausa longa da thread que levou o bloqueio.
+364:     - CAPTCHA_PAUSA_GLOBAL_SEGUNDOS: pausa compartilhada entre as threads.
+365: 
+366:     A resolução automática de captcha por serviço externo (2Captcha, CapMonster
+367:     etc.) não está implementada — o comportamento padrão é pausar e desistir da
+368:     área em vez de insistir. Em coletas muito grandes, aumente as pausas acima.
 369: 
-370: 14. Rodando via Docker (comandos do dia a dia)
+370: 10. commit forçado
 371: 
-372:     Todos os comandos são executados na raiz do projeto (onde está o
-373:     docker-compose.yml), no terminal do host.
-374: 
-375:     Subir / atualizar
-376:     ```
-377:     docker compose up -d --build     # build da imagem + sobe em background
-378:     docker compose logs -f app       # acompanha os logs em tempo real
-379:     docker compose ps                # status do container
-380:     ```
-381: 
-382:     Rebuild (`--build`) é obrigatório sempre que mudar algo em `src/`, no
-383:     Dockerfile ou no requirements.txt. `docker compose restart` NÃO pega código
-384:     nem `.env` novos — ele só reinicia o processo.
+372:     git add -A; git commit -m "sync local $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
+373: 
+374: 11. Próximos Passos (Melhorias Futuras)
+375: 
+376:     Já implementado:
+377:     - Base de localidades offline no DuckDB (estados, municípios e distritos do IBGE).
+378:     - Detecção de captcha com pausa longa e cooldown compartilhado entre threads.
+379: 
+380:     Pendências sugeridas:
+381:     - Resolução automática de captcha: integrar um serviço (2Captcha/CapMonster) para
+382:       coletas muito grandes, hoje o robô apenas pausa e desiste da área.
+383: 
+384:     - Enriquecimento de E-mail: Criar um script secundário que lê os sites encontrados e busca e-mails de contato (usando Regex).
 385: 
-386:     Parar / reiniciar
-387:     ```
-388:     docker compose stop      # para o container (o progresso no banco é preservado)
-389:     docker compose start     # sobe o mesmo container de novo
-390:     docker compose restart   # reinicia o processo (sem rebuild e sem reler o .env)
-391:     docker compose down      # remove o container (os dados ficam nos volumes)
-392:     ```
-393: 
-394:     Depois de editar o `.env`:
-395:     ```
-396:     docker compose up -d     # recria o container com as novas variáveis
-397:     ```
+386: 
+387: 12. Memória do Projeto para IA (pasta memory/)
+388: 
+389:     A pasta `memory/` reúne documentação resumida e densa, pensada para ser lida
+390:     por modelos de IA antes de alterar o código (economiza contexto/custo).
+391: 
+392:     Ordem de leitura:
+393:     1. memory/00-resumo-projeto.md        -> objetivo, stack e estrutura
+394:     2. memory/01-arquitetura-e-modulos.md -> módulos, funções e fluxos
+395:     3. memory/02-decisoes-e-armadilhas.md -> decisões, bugs conhecidos, cuidados
+396:     4. memory/03-historico-de-mudancas.md -> o que mudou e o que ficou pendente
+397:     5. memory/04-como-contribuir.md       -> padrões de código, logs, testes e docs
 398: 
-399:     Abrir shell / rodar utilitários dentro do container:
-400:     ```
-401:     docker compose exec app sh
-402:     docker compose exec app python src/schema.py   # cria/ajusta tabelas (idempotente)
-403:     ```
+399:     Regras: manter os arquivos curtos, registrar o "porquê" das decisões e nunca
+400:     colocar segredos ali (API keys ficam apenas no `.env`).
+401: 
+402: 
+403: 13. Observação sobre configuração
 404: 
-405:     Ver o progresso da coleta de dentro do container:
-406:     ```
-407:     docker compose exec app python -c "from src.database import LeadDatabase as L; db=L(); p=db.progresso_carregar('barbearias'); print('cidades:', len(p), '| concluidas:', sum(1 for v in p.values() if v['status']=='concluida')); db.close()"
-408:     ```
+405:     O modelo completo e comentado de todas as variáveis está em `.env.example`.
+406:     Cada item traz a faixa de valores e o efeito colateral. Comentários devem
+407:     ficar em linha própria; comentário na mesma linha do valor é lido como parte
+408:     do valor.
 409: 
-410:     Diagnóstico:
-411:     ```
-412:     docker compose logs --tail=100 app   # últimas 100 linhas
-413:     docker compose top                   # processos dentro do container
-414:     docker stats map_scraper             # CPU e memória em tempo real
-415:     ```
-416: 
-417:     O compose usa `restart: unless-stopped`: se a VPS reiniciar, o container volta
-418:     sozinho e, como o progresso está no banco, ele retoma da cidade seguinte.
-419: 
-420: 15. Rodando sem Docker (local)
+410: 14. Rodando via Docker (comandos do dia a dia)
+411: 
+412:     Todos os comandos são executados na raiz do projeto (onde está o
+413:     docker-compose.yml), no terminal do host.
+414: 
+415:     Subir / atualizar
+416:     ```
+417:     docker compose up -d --build     # build da imagem + sobe em background
+418:     docker compose logs -f app       # acompanha os logs em tempo real
+419:     docker compose ps                # status do container
+420:     ```
 421: 
-422:     Requisitos: Python 3.11+ e o `.env` na raiz. Instalação (uma única vez):
-423: 
-424:     Windows (PowerShell):
-425:     ```
-426:     python -m venv venv
-427:     .\venv\Scripts\Activate.ps1
-428:     python -m pip install -r requirements.txt
-429:     python -m playwright install chromium
-430:     Copy-Item .env.example .env
-431:     ```
-432: 
-433:     Linux/macOS:
-434:     ```
-435:     python3 -m venv venv
-436:     source venv/bin/activate
-437:     python -m pip install -r requirements.txt
-438:     python -m playwright install --with-deps chromium
-439:     cp .env.example .env
+422:     Rebuild (`--build`) é obrigatório sempre que mudar algo em `src/`, no
+423:     Dockerfile ou no requirements.txt. `docker compose restart` NÃO pega código
+424:     nem `.env` novos — ele só reinicia o processo.
+425: 
+426:     Parar / reiniciar
+427:     ```
+428:     docker compose stop      # para o container (o progresso no banco é preservado)
+429:     docker compose start     # sobe o mesmo container de novo
+430:     docker compose restart   # reinicia o processo (sem rebuild e sem reler o .env)
+431:     docker compose down      # remove o container (os dados ficam nos volumes)
+432:     ```
+433: 
+434:     Depois de editar o `.env`:
+435:     ```
+436:     docker compose up -d     # recria o container com as novas variáveis
+437:     ```
+438: 
+439:     Abrir shell / rodar utilitários dentro do container:
 440:     ```
-441: 
-442:     Comandos de execução:
+441:     docker compose exec app sh
+442:     docker compose exec app python src/schema.py   # cria/ajusta tabelas (idempotente)
 443:     ```
-444:     python src/main.py              # menu interativo (coleta, envio, IBGE, bairros)
-445:     python src/main.py --so-enviar  # pula a coleta e só dispara o WhatsApp
-446:     python src/coleta_auto.py       # coleta automática contínua (mesmo runner do Docker)
-447:     python src/schema.py            # cria/ajusta as tabelas do banco
+444: 
+445:     Ver o progresso da coleta de dentro do container:
+446:     ```
+447:     docker compose exec app python -c "from src.database import LeadDatabase as L; db=L(); p=db.progresso_carregar('barbearias'); print('cidades:', len(p), '| concluidas:', sum(1 for v in p.values() if v['status']=='concluida')); db.close()"
 448:     ```
 449: 
-450:     O `coleta_auto.py` é o equivalente ao container: lê o `.env`, percorre as
-451:     UFs/cidades e grava o progresso em `coleta_progresso`. Para deixar rodando
-452:     depois de fechar o terminal:
-453: 
-454:     Linux/macOS:
+450:     Diagnóstico:
+451:     ```
+452:     docker compose logs --tail=100 app   # últimas 100 linhas
+453:     docker compose top                   # processos dentro do container
+454:     docker stats map_scraper             # CPU e memória em tempo real
 455:     ```
-456:     nohup python src/coleta_auto.py > coleta.log 2>&1 &
-457:     tail -f coleta.log
-458:     ```
+456: 
+457:     O compose usa `restart: unless-stopped`: se a VPS reiniciar, o container volta
+458:     sozinho e, como o progresso está no banco, ele retoma da cidade seguinte.
 459: 
-460:     Windows (PowerShell):
-461:     ```
-462:     Start-Process -FilePath ".\venv\Scripts\python.exe" -ArgumentList "src\coleta_auto.py" -RedirectStandardOutput coleta.log -RedirectStandardError coleta.err -WindowStyle Hidden
-463:     Get-Content coleta.log -Wait
-464:     ```
-465: 
-466:     Para parar: `Ctrl+C` no terminal (ou `Stop-Process -Id <PID>` no Windows).
-467:     O que já foi coletado fica salvo e a próxima execução retoma de onde parou.
-468: 
-469:     Diferença em relação ao Docker: no Docker o `.env` entra por `env_file` e
-470:     `./data`/`./output` são volumes; localmente os caminhos são os do próprio
-471:     projeto (`data/leads.duckdb` e `output/`). O banco usado depende do `.env`
-472:     (`DB_ENGINE=postgres` ou `duckdb`).
-473: 
-474: 16. Retomada e acompanhamento da coleta
-475: 
-476:     - `RETOMAR_COLETA=true` (padrão): pula as cidades já concluídas, registradas
-477:       em `coleta_progresso`.
-478:     - `RECAPTURA_DIAS=30`: cidade concluída volta para a fila depois de 30 dias
-479:       (`0` = nunca refazer).
-480:     - `SEMEAR_PROGRESSO=true`: na primeira execução com a tabela vazia, cidades
-481:       que já têm leads no banco são marcadas como concluídas.
-482:     - Cidade interrompida (captcha, timeout, máquina desligada) fica
-483:       `em_andamento`, `parcial` ou `erro` e volta automaticamente no próximo ciclo.
-484:     - `RETOMAR_COLETA=false` restaura o comportamento antigo (refaz tudo a cada
-485:       ciclo), útil para um passe completo de atualização.
-486: 
-487:     Consultas úteis (DBeaver, psql ou qualquer cliente do banco):
-488:     ```sql
-489:     -- panorama por UF
-490:     SELECT uf, status, COUNT(*) FROM coleta_progresso
-491:     GROUP BY uf, status ORDER BY uf, status;
-492: 
-493:     -- o que está sendo coletado agora
-494:     SELECT uf, cidade, status, leads_total, tentativas, atualizado_em
-495:     FROM coleta_progresso
-496:     WHERE status IN ('em_andamento', 'parcial', 'erro')
-497:     ORDER BY atualizado_em DESC;
-498: 
-499:     -- total concluído x pendente
-500:     SELECT status, COUNT(*) FROM coleta_progresso GROUP BY status;
+460: 15. Rodando sem Docker (local)
+461: 
+462:     Requisitos: Python 3.11+ e o `.env` na raiz. Instalação (uma única vez):
+463: 
+464:     Windows (PowerShell):
+465:     ```
+466:     python -m venv venv
+467:     .\venv\Scripts\Activate.ps1
+468:     python -m pip install -r requirements.txt
+469:     python -m playwright install chromium
+470:     Copy-Item .env.example .env
+471:     ```
+472: 
+473:     Linux/macOS:
+474:     ```
+475:     python3 -m venv venv
+476:     source venv/bin/activate
+477:     python -m pip install -r requirements.txt
+478:     python -m playwright install --with-deps chromium
+479:     cp .env.example .env
+480:     ```
+481: 
+482:     Comandos de execução:
+483:     ```
+484:     python src/main.py              # menu interativo (coleta, envio, IBGE, bairros)
+485:     python src/main.py --so-enviar  # pula a coleta e só dispara o WhatsApp
+486:     python src/coleta_auto.py       # coleta automática contínua (mesmo runner do Docker)
+487:     python src/schema.py            # cria/ajusta as tabelas do banco
+488:     ```
+489: 
+490:     O `coleta_auto.py` é o equivalente ao container: lê o `.env`, percorre as
+491:     UFs/cidades e grava o progresso em `coleta_progresso`. Para deixar rodando
+492:     depois de fechar o terminal:
+493: 
+494:     Linux/macOS:
+495:     ```
+496:     nohup python src/coleta_auto.py > coleta.log 2>&1 &
+497:     tail -f coleta.log
+498:     ```
+499: 
+500:     Windows (PowerShell):
 501:     ```
-502: 
-503:     Se a tabela ainda não existir no banco (imagem antiga), rode
-504:     `python src/schema.py` ou `docker compose exec app python src/schema.py`.
-505:     Ela também é criada sozinha na primeira cidade coletada.
+502:     Start-Process -FilePath ".\venv\Scripts\python.exe" -ArgumentList "src\coleta_auto.py" -RedirectStandardOutput coleta.log -RedirectStandardError coleta.err -WindowStyle Hidden
+503:     Get-Content coleta.log -Wait
+504:     ```
+505: 
+506:     Para parar: `Ctrl+C` no terminal (ou `Stop-Process -Id <PID>` no Windows).
+507:     O que já foi coletado fica salvo e a próxima execução retoma de onde parou.
+508: 
+509:     Diferença em relação ao Docker: no Docker o `.env` entra por `env_file` e
+510:     `./data`/`./output` são volumes; localmente os caminhos são os do próprio
+511:     projeto (`data/leads.duckdb` e `output/`). O banco usado depende do `.env`
+512:     (`DB_ENGINE=postgres` ou `duckdb`).
+513: 
+514: 16. Retomada e acompanhamento da coleta
+515: 
+516:     - `RETOMAR_COLETA=true` (padrão): pula as cidades já concluídas, registradas
+517:       em `coleta_progresso`.
+518:     - `RECAPTURA_DIAS=30`: cidade concluída volta para a fila depois de 30 dias
+519:       (`0` = nunca refazer).
+520:     - `SEMEAR_PROGRESSO=true`: na primeira execução com a tabela vazia, cidades
+521:       que já têm leads no banco são marcadas como concluídas.
+522:     - Cidade interrompida (captcha, timeout, máquina desligada) fica
+523:       `em_andamento`, `parcial` ou `erro` e volta automaticamente no próximo ciclo.
+524:     - `RETOMAR_COLETA=false` restaura o comportamento antigo (refaz tudo a cada
+525:       ciclo), útil para um passe completo de atualização.
+526: 
+527:     Consultas úteis (DBeaver, psql ou qualquer cliente do banco):
+528:     ```sql
+529:     -- panorama por UF
+530:     SELECT uf, status, COUNT(*) FROM coleta_progresso
+531:     GROUP BY uf, status ORDER BY uf, status;
+532: 
+533:     -- o que está sendo coletado agora
+534:     SELECT uf, cidade, status, leads_total, tentativas, atualizado_em
+535:     FROM coleta_progresso
+536:     WHERE status IN ('em_andamento', 'parcial', 'erro')
+537:     ORDER BY atualizado_em DESC;
+538: 
+539:     -- total concluído x pendente
+540:     SELECT status, COUNT(*) FROM coleta_progresso GROUP BY status;
+541:     ```
+542: 
+543:     Se a tabela ainda não existir no banco (imagem antiga), rode
+544:     `python src/schema.py` ou `docker compose exec app python src/schema.py`.
+545:     Ela também é criada sozinha na primeira cidade coletada.
 ````
 
 
 # Git Diffs
 ## Git Diffs Working Tree
 ````diff
+diff --git a/README.md b/README.md
+index acfb2dc..f592f7e 100644
+--- a/README.md
++++ b/README.md
+@@ -542,4 +542,5 @@ Documentação do Projeto: MAP SCRAPER
+ 
+     Se a tabela ainda não existir no banco (imagem antiga), rode
+     `python src/schema.py` ou `docker compose exec app python src/schema.py`.
+-    Ela também é criada sozinha na primeira cidade coletada.
+\ No newline at end of file
++    Ela também é criada sozinha na primeira cidade coletada.
++    
+\ No newline at end of file
 
 ````
 

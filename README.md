@@ -543,3 +543,4 @@ Documentação do Projeto: MAP SCRAPER
     Se a tabela ainda não existir no banco (imagem antiga), rode
     `python src/schema.py` ou `docker compose exec app python src/schema.py`.
     Ela também é criada sozinha na primeira cidade coletada.
+    
