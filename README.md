@@ -122,7 +122,16 @@ Documentação do Projeto: MAP SCRAPER
     SINCRONIZAR=false         # baixar IBGE antes (banco novo)
     LOOP=false                # true = rodar em loop contínuo
     LOOP_PAUSA_SEGUNDOS=3600  # pausa entre ciclos (LOOP=true)
+    RETOMAR_COLETA=true       # pular cidades já concluídas (retoma de onde parou)
+    RECAPTURA_DIAS=30         # refazer concluídas há mais de N dias (0 = nunca)
+    SEMEAR_PROGRESSO=true     # 1ª execução: cidades com leads viram concluídas
+    SCRAPER_THREADS=3         # navegadores em paralelo (VPS pequena: 1 ou 2)
+    BLOQUEAR_RECURSOS=true    # desliga imagens/mídia (reduz CPU)
+    MAX_CONTEXTOS_POR_NAVEGADOR=40  # recicla o Chromium a cada N áreas
     ```
+
+    Os comentários acima são ilustrativos. No `.env` real o comentário deve ficar
+    em linha própria — na mesma linha ele passa a fazer parte do valor.
 
     Subir e acompanhar:
 
@@ -130,6 +139,9 @@ Documentação do Projeto: MAP SCRAPER
     docker compose up -d --build
     docker compose logs -f app
     ```
+
+    Os comandos do dia a dia (rebuild, parar, reiniciar, ver progresso) estão
+    na seção 14; sem Docker, use a seção 15.
 
     O `.env` é injetado no container via `env_file` (banco e WAHA). Os volumes
     `./data` e `./output` são montados para persistir DuckDB/Excel localmente.
@@ -354,3 +366,140 @@ Documentação do Projeto: MAP SCRAPER
     Cada item traz a faixa de valores e o efeito colateral. Comentários devem
     ficar em linha própria; comentário na mesma linha do valor é lido como parte
     do valor.
+
+14. Rodando via Docker (comandos do dia a dia)
+
+    Todos os comandos são executados na raiz do projeto (onde está o
+    docker-compose.yml), no terminal do host.
+
+    Subir / atualizar
+    ```
+    docker compose up -d --build     # build da imagem + sobe em background
+    docker compose logs -f app       # acompanha os logs em tempo real
+    docker compose ps                # status do container
+    ```
+
+    Rebuild (`--build`) é obrigatório sempre que mudar algo em `src/`, no
+    Dockerfile ou no requirements.txt. `docker compose restart` NÃO pega código
+    nem `.env` novos — ele só reinicia o processo.
+
+    Parar / reiniciar
+    ```
+    docker compose stop      # para o container (o progresso no banco é preservado)
+    docker compose start     # sobe o mesmo container de novo
+    docker compose restart   # reinicia o processo (sem rebuild e sem reler o .env)
+    docker compose down      # remove o container (os dados ficam nos volumes)
+    ```
+
+    Depois de editar o `.env`:
+    ```
+    docker compose up -d     # recria o container com as novas variáveis
+    ```
+
+    Abrir shell / rodar utilitários dentro do container:
+    ```
+    docker compose exec app sh
+    docker compose exec app python src/schema.py   # cria/ajusta tabelas (idempotente)
+    ```
+
+    Ver o progresso da coleta de dentro do container:
+    ```
+    docker compose exec app python -c "from src.database import LeadDatabase as L; db=L(); p=db.progresso_carregar('barbearias'); print('cidades:', len(p), '| concluidas:', sum(1 for v in p.values() if v['status']=='concluida')); db.close()"
+    ```
+
+    Diagnóstico:
+    ```
+    docker compose logs --tail=100 app   # últimas 100 linhas
+    docker compose top                   # processos dentro do container
+    docker stats map_scraper             # CPU e memória em tempo real
+    ```
+
+    O compose usa `restart: unless-stopped`: se a VPS reiniciar, o container volta
+    sozinho e, como o progresso está no banco, ele retoma da cidade seguinte.
+
+15. Rodando sem Docker (local)
+
+    Requisitos: Python 3.11+ e o `.env` na raiz. Instalação (uma única vez):
+
+    Windows (PowerShell):
+    ```
+    python -m venv venv
+    .\venv\Scripts\Activate.ps1
+    python -m pip install -r requirements.txt
+    python -m playwright install chromium
+    Copy-Item .env.example .env
+    ```
+
+    Linux/macOS:
+    ```
+    python3 -m venv venv
+    source venv/bin/activate
+    python -m pip install -r requirements.txt
+    python -m playwright install --with-deps chromium
+    cp .env.example .env
+    ```
+
+    Comandos de execução:
+    ```
+    python src/main.py              # menu interativo (coleta, envio, IBGE, bairros)
+    python src/main.py --so-enviar  # pula a coleta e só dispara o WhatsApp
+    python src/coleta_auto.py       # coleta automática contínua (mesmo runner do Docker)
+    python src/schema.py            # cria/ajusta as tabelas do banco
+    ```
+
+    O `coleta_auto.py` é o equivalente ao container: lê o `.env`, percorre as
+    UFs/cidades e grava o progresso em `coleta_progresso`. Para deixar rodando
+    depois de fechar o terminal:
+
+    Linux/macOS:
+    ```
+    nohup python src/coleta_auto.py > coleta.log 2>&1 &
+    tail -f coleta.log
+    ```
+
+    Windows (PowerShell):
+    ```
+    Start-Process -FilePath ".\venv\Scripts\python.exe" -ArgumentList "src\coleta_auto.py" -RedirectStandardOutput coleta.log -RedirectStandardError coleta.err -WindowStyle Hidden
+    Get-Content coleta.log -Wait
+    ```
+
+    Para parar: `Ctrl+C` no terminal (ou `Stop-Process -Id <PID>` no Windows).
+    O que já foi coletado fica salvo e a próxima execução retoma de onde parou.
+
+    Diferença em relação ao Docker: no Docker o `.env` entra por `env_file` e
+    `./data`/`./output` são volumes; localmente os caminhos são os do próprio
+    projeto (`data/leads.duckdb` e `output/`). O banco usado depende do `.env`
+    (`DB_ENGINE=postgres` ou `duckdb`).
+
+16. Retomada e acompanhamento da coleta
+
+    - `RETOMAR_COLETA=true` (padrão): pula as cidades já concluídas, registradas
+      em `coleta_progresso`.
+    - `RECAPTURA_DIAS=30`: cidade concluída volta para a fila depois de 30 dias
+      (`0` = nunca refazer).
+    - `SEMEAR_PROGRESSO=true`: na primeira execução com a tabela vazia, cidades
+      que já têm leads no banco são marcadas como concluídas.
+    - Cidade interrompida (captcha, timeout, máquina desligada) fica
+      `em_andamento`, `parcial` ou `erro` e volta automaticamente no próximo ciclo.
+    - `RETOMAR_COLETA=false` restaura o comportamento antigo (refaz tudo a cada
+      ciclo), útil para um passe completo de atualização.
+
+    Consultas úteis (DBeaver, psql ou qualquer cliente do banco):
+    ```sql
+    -- panorama por UF
+    SELECT uf, status, COUNT(*) FROM coleta_progresso
+    GROUP BY uf, status ORDER BY uf, status;
+
+    -- o que está sendo coletado agora
+    SELECT uf, cidade, status, leads_total, tentativas, atualizado_em
+    FROM coleta_progresso
+    WHERE status IN ('em_andamento', 'parcial', 'erro')
+    ORDER BY atualizado_em DESC;
+
+    -- total concluído x pendente
+    SELECT status, COUNT(*) FROM coleta_progresso GROUP BY status;
+    ```
+
+    Se a tabela ainda não existir no banco (imagem antiga), rode
+    `python src/schema.py` ou `docker compose exec app python src/schema.py`.
+    Ela também é criada sozinha na primeira cidade coletada.
