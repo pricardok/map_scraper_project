@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 import requests
 
 from src import backend
+from src import meta_whatsapp
+from src import chatwoot_registro
 from src.config import carregar_env, env_int, str_para_bool
 
 carregar_env()
@@ -27,6 +29,22 @@ carregar_env()
 WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
 WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
 WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
+
+# ---------------------------------------------------------------------------
+# PROVEDOR DE ENVIO
+# ---------------------------------------------------------------------------
+#   meta  -> API OFICIAL da Meta (Cloud API) — PADRÃO
+#   waha  -> WAHA (WhatsApp Web não oficial) — BACKUP manual
+#
+# IMPORTANTE: é BACKUP, não fallback. O provedor escolhido aqui é o único que
+# roda. Se a Meta falhar, o lead é marcado como 'falhou' — NÃO tentamos a WAHA
+# automaticamente, porque isso mascararia problemas (ex.: template rejeitado)
+# e misturaria dois canais no mesmo log.
+# Para usar a WAHA, troque a variável e rode de novo.
+WHATSAPP_PROVIDER = os.environ.get("WHATSAPP_PROVIDER", "meta").strip().lower()
+if WHATSAPP_PROVIDER not in ("meta", "waha"):
+    print(f"Aviso: WHATSAPP_PROVIDER inválido ({WHATSAPP_PROVIDER!r}). Usando 'meta'.")
+    WHATSAPP_PROVIDER = "meta"
 
 # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
 WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
@@ -380,13 +398,162 @@ def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None)
     return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
 
 
-def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None):
+# ---------------------------------------------------------------------------
+# Roteamento por provedor
+# ---------------------------------------------------------------------------
+def provedor_atual():
+    """Rótulo do provedor em uso ('meta' ou 'waha')."""
+    return WHATSAPP_PROVIDER
+
+
+def descrever_provedor():
+    """Descrição do provedor para exibir no menu."""
+    if WHATSAPP_PROVIDER == "meta":
+        return meta_whatsapp.descrever()
+    return f"WAHA (backup) — {WAHA_API_URL}, sessão '{WAHA_SESSION}'"
+
+
+def _pode_registrar_chatwoot():
+    """O Chatwoot só recebe registro quando o envio foi pela API oficial.
+
+    O inbox do Chatwoot aponta para o número oficial (6260). Registrar um
+    envio feito pela WAHA criaria uma conversa cuja resposta sairia pelo
+    número errado — e cuja mensagem de retorno do lead nunca chegaria ao
+    Chatwoot (o bridge está só na rota Meta).
+    """
+    if WHATSAPP_PROVIDER == "meta":
+        return True
+    return str_para_bool(os.environ.get("CHATWOOT_REGISTRAR_WAHA"), padrao=False)
+
+
+def enviar_para_lead(lead, texto_renderizado=None):
+    """Envia a campanha para UM lead usando o provedor configurado.
+
+    - `meta`: envia o TEMPLATE aprovado (META_TEMPLATE_NOME). O texto livre do
+      banco NÃO vai para o lead — serve só para o log.
+    - `waha`: envia o texto livre normalmente (comportamento original).
+      ⚠️ NÃO registra no Chatwoot (ver `_pode_registrar_chatwoot`).
+
+    Returns:
+        dict com {ok, status_code, wamid, chat_id, response, erro,
+                  registrado_chatwoot}
+
+    Nunca levanta exceção: devolve ok=False e o motivo em `erro`.
+    """
+    telefone = lead.get("telefone")
+    texto_renderizado = texto_renderizado or ""
+
+    if WHATSAPP_PROVIDER == "meta":
+        params = meta_whatsapp._params_do_lead(lead)
+        resultado = meta_whatsapp.enviar_template(
+            telefone, body_params=params
+        )
+        retorno = {
+            "ok": resultado["ok"],
+            "status_code": resultado["status_code"],
+            "wamid": resultado.get("wamid"),
+            "chat_id": None,
+            "response": resultado.get("response"),
+            "erro": resultado.get("erro"),
+            "registrado_chatwoot": False,
+        }
+    else:
+        # WAHA: precisa do chatId (@lid ou @c.us)
+        chat_id = lead.get("chat_id_waha")
+        if not chat_id:
+            chat_id = _resolver_chatid_waha(telefone)
+        if not chat_id:
+            return {
+                "ok": False, "status_code": None, "wamid": None,
+                "chat_id": None, "response": None,
+                "erro": "telefone inválido (não foi possível resolver o chatId)",
+                "registrado_chatwoot": False,
+            }
+        try:
+            resposta = enviar_texto_waha(chat_id, texto_renderizado)
+            retorno = {
+                "ok": True, "status_code": 200, "wamid": None,
+                "chat_id": chat_id, "response": resposta,
+                "erro": None, "registrado_chatwoot": False,
+            }
+        except Exception as e:
+            payload_erro = None
+            if getattr(e, "response", None) is not None:
+                try:
+                    payload_erro = e.response.text
+                except Exception:
+                    payload_erro = None
+            return {
+                "ok": False,
+                "status_code": getattr(getattr(e, "response", None), "status_code", None),
+                "wamid": None, "chat_id": chat_id, "response": payload_erro,
+                "erro": f"{type(e).__name__}: {e}",
+                "registrado_chatwoot": False,
+            }
+
+    # ------------------------------------------------------------------
+    # Registro no Chatwoot (nota privada) — só quando o envio deu certo.
+    # Falha aqui NÃO invalida o envio: já foi aceito pela Meta/WAHA.
+    #
+    # ⚠️ SÓ REGISTRA NO PROVEDOR OFICIAL (`meta`).
+    #
+    # Por que bloquear o WAHA:
+    #   1. O inbox do Chatwoot é `whatsapp_cloud` → phone_number_id 1121736814366847
+    #      (o número oficial 6260). Se um atendente responder, a resposta sai
+    #      pelo 6260 — mas o lead recebeu a campanha de OUTRO número (WAHA).
+    #      O lead vê dois números na mesma conversa e desconfia de golpe.
+    #   2. O bridge do Chatwoot está apenas na rota do webhook Meta
+    #      (`meta_webhook_routes`). Mensagem recebida via WAHA NUNCA chega ao
+    #      Chatwoot — a conversa fica "muda" e o atendente acha que o lead
+    #      ignorou, quando na verdade respondeu por outro canal.
+    #   3. Todo tráfego do Chatwoot sai pelo número oficial; leads que só
+    #      conhecem o número da WAHA recebendo mensagem do 6260 pode ser
+    #      reportado como spam e derrubar a qualidade do número oficial.
+    #
+    # Para forçar o registro no WAHA (NÃO recomendado), defina no .env:
+    #   CHATWOOT_REGISTRAR_WAHA=true
+    # ------------------------------------------------------------------
+    if retorno["ok"] and chatwoot_registro.ativo():
+        if _pode_registrar_chatwoot():
+            try:
+                retorno["registrado_chatwoot"] = chatwoot_registro.registrar_envio(
+                    lead,
+                    template_nome=(meta_whatsapp.META_TEMPLATE_NOME
+                                   if WHATSAPP_PROVIDER == "meta" else "texto-livre"),
+                    wamid=retorno.get("wamid"),
+                    mensagem_log=texto_renderizado,
+                )
+            except Exception as e:
+                print(f"Aviso: falha ao registrar no Chatwoot (ignorado): {e}")
+        else:
+            print("Aviso: envio via WAHA NÃO é registrado no Chatwoot "
+                  "(use WHATSAPP_PROVIDER=meta para ter o registro).")
+
+    return retorno
+
+
+def enviar_teste_numero(numero, texto_renderizado=None):
+    """Envio de teste para um número bruto, respeitando o provedor.
+
+    Para o provedor `meta` o número é tratado como um lead fictício (só o
+    telefone importa, já que o conteúdo vem do template aprovado).
+    """
+    lead_ficticio = {"telefone": numero, "nome": "", "cidade": ""}
+    return enviar_para_lead(lead_ficticio, texto_renderizado)
+
+
+def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None,
+                      ignorar_limite_dia=False):
     """Envia mensagens para os leads celulares pendentes.
 
     - db: instância de LeadDatabase
     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
     - intervalo: pausa fixa em segundos entre envios (usado se não houver cadência)
     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
+    - ignorar_limite_dia: quando True, NÃO aplica `WAHA_LIMITE_DIA`.
+      Usado apenas quando o operador confirma explicitamente no menu — o teto
+      diário é uma proteção contra bloqueio do número, então ignorá-lo precisa
+      ser uma decisão consciente, nunca automática.
 
     Respeita dois tetos independentes:
     - `leads`/`limite`: quantos enviar nesta campanha;
@@ -411,7 +578,7 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
 
     # Teto diário (soma todas as campanhas do dia, lido do log de envios).
     enviados_hoje = 0
-    if WAHA_LIMITE_DIA:
+    if WAHA_LIMITE_DIA and not ignorar_limite_dia:
         enviados_hoje = envios_hoje(db)
         restante_dia = WAHA_LIMITE_DIA - enviados_hoje
         if restante_dia <= 0:
@@ -423,6 +590,9 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
                   f"reduzindo esta campanha para {restante_dia} envio(s).")
             leads = leads.head(restante_dia)
             total = len(leads)
+    elif WAHA_LIMITE_DIA and ignorar_limite_dia:
+        print(f"ATENÇÃO: teto diário de {WAHA_LIMITE_DIA} IGNORADO por decisão manual. "
+              f"Já enviados hoje: {envios_hoje(db)}.")
 
     # Cadência aleatória (ex.: 3 a cada 60s) tem prioridade sobre o intervalo fixo.
     cadencia = _parse_cadencia(WAHA_CADENCIA)
@@ -444,7 +614,7 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
                   f"pendentes para o próximo horário.")
             break
 
-        if WAHA_LIMITE_DIA:
+        if WAHA_LIMITE_DIA and not ignorar_limite_dia:
             enviados_hoje = envios_hoje(db)
             if enviados_hoje >= WAHA_LIMITE_DIA:
                 print(f"Limite diário atingido ({enviados_hoje}/{WAHA_LIMITE_DIA}). "
@@ -457,45 +627,42 @@ def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, lea
         nome = lead.get("nome")
         cidade = lead.get("cidade")
 
-        chat_id = lead.get("chat_id_waha")
-        if not chat_id:
-            # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
-            # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
-            chat_id = _resolver_chatid_waha(telefone)
-            if chat_id:
+        # Envia pelo provedor configurado (meta = template oficial | waha = texto).
+        resultado = enviar_para_lead(lead, texto)
+        chat_id = resultado.get("chat_id")
+
+        if resultado["ok"]:
+            # Cacheia o chatId só quando o provedor é WAHA (a Meta não usa).
+            if chat_id and not lead.get("chat_id_waha"):
                 db.salvar_chat_id_waha(nome, cidade, chat_id)
 
-        if not chat_id:
-            db.marcar_envio(nome, cidade, "falhou")
-            db.salvar_log_envio(
-                lead_id, nome, cidade, telefone, chat_id, "falhou",
-                mensagem=texto, erro="telefone inválido",
-            )
-            print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
-            continue
-
-        try:
-            resposta = enviar_texto_waha(chat_id, texto)
-            db.marcar_envio(nome, cidade, "enviado")
+            # Marca por telefone: o mesmo número pode estar em várias linhas
+            # (filiais / mesmo negócio em cidades diferentes). Marcar todas
+            # evita que ele volte na próxima campanha por outra linha.
+            db.marcar_envio(nome, cidade, "enviado",
+                            lead_id=lead_id, telefone=telefone)
             db.salvar_log_envio(
                 lead_id, nome, cidade, telefone, chat_id, "enviado",
-                mensagem=texto, payload=resposta,
+                mensagem=texto, payload=resultado.get("response"),
             )
-            print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
-        except Exception as e:
-            payload_erro = None
-            if getattr(e, "response", None) is not None:
-                try:
-                    payload_erro = e.response.text
-                except Exception:
-                    payload_erro = None
-            erro = f"{type(e).__name__}: {e}"
-            db.marcar_envio(nome, cidade, "falhou")
+            extra = ""
+            if resultado.get("wamid"):
+                extra += f" wamid={resultado['wamid'][:24]}…"
+            if resultado.get("registrado_chatwoot"):
+                extra += " [chatwoot ✓]"
+            print(f"[{i}/{total}] ENVIADO -> {nome} ({telefone}){extra}")
+        else:
+            erro = resultado.get("erro") or "erro desconhecido"
+            # Em falha NÃO marcamos o telefone inteiro: o número pode ser
+            # válido e o problema ter sido temporário (token, rede). Marcar só
+            # a linha evita "queimar" o número para futuras campanhas.
+            db.marcar_envio(nome, cidade, "falhou",
+                            lead_id=lead_id)
             db.salvar_log_envio(
                 lead_id, nome, cidade, telefone, chat_id, "falhou",
-                mensagem=texto, payload=payload_erro, erro=erro,
+                mensagem=texto, payload=resultado.get("response"), erro=erro,
             )
-            print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
+            print(f"[{i}/{total}] FALHOU -> {nome} ({telefone}): {erro}")
 
         if i < total:
             time.sleep(pausas[i - 1])

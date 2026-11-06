@@ -19,11 +19,13 @@ from src.scraper import rodar_scraper_multithread
 from src.database import LeadDatabase
 from src.whatsapp import (
     disparar_campanha,
-    enviar_texto_numero,
+    enviar_teste_numero,
     aviso_fora_da_janela,
     descrever_janela,
+    descrever_provedor,
     janela_aberta,
     resumo_limite_dia,
+    provedor_atual,
     WAHA_INTERVALO,
     WAHA_LIMITE,
     WAHA_LIMITE_DIA,
@@ -176,28 +178,72 @@ def testar_envio(db, mensagem, pendentes=None):
         return
 
     try:
-        enviar_texto_numero(numero, mensagem)
-        print(f"✅ Teste enviado para {numero}")
+        resultado = enviar_teste_numero(numero, mensagem)
+        if resultado.get("ok"):
+            extra = ""
+            if resultado.get("wamid"):
+                extra = f" (wamid={resultado['wamid'][:24]}…)"
+            if resultado.get("registrado_chatwoot"):
+                extra += " [chatwoot ✓]"
+            print(f"✅ Teste enviado para {numero}{extra}")
+        else:
+            print(f"❌ Falha no teste para {numero}: {resultado.get('erro')}")
     except Exception as e:
         print(f"❌ Falha no teste para {numero}: {e}")
 
 
 def enviar_whatsapp_menu():
-    print("\n=== ENVIO WHATSAPP (WAHA) ===")
+    print("\n=== ENVIO WHATSAPP ===")
+    print(f"Provedor: {descrever_provedor()}")
 
     if not WAHA_ATIVO:
         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
         return
 
+    # Para o provedor Meta o conteúdo vem do template aprovado, não do banco.
+    if provedor_atual() == "meta":
+        import src.meta_whatsapp as meta_whatsapp
+        if not meta_whatsapp.configurado():
+            print("Meta API não configurada. Defina META_ACCESS_TOKEN e "
+                  "META_PHONE_NUMBER_ID no .env.")
+            return
+        if not meta_whatsapp.template_configurado():
+            print("Nenhum template definido. Defina META_TEMPLATE_NOME no .env "
+                  "(ex.: mkt_01).")
+            return
+
     db = LeadDatabase()
 
     templates = db.listar_templates_ativos()
-    if not templates:
-        print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
-        db.close()
-        return
 
-    mensagem = _escolher_template(templates)
+    if provedor_atual() == "meta":
+        # ⚠️ Com o provedor Meta o CONTEÚDO enviado ao lead é o template
+        # APROVADO na Meta (META_TEMPLATE_NOME). O `templates_whatsapp` do
+        # banco NÃO é enviado — serve só como texto descritivo no log
+        # (whatsapp_envios_log.mensagem).
+        #
+        # Por isso NÃO perguntamos qual template usar: a escolha não teria
+        # efeito no que o lead recebe. Usamos o primeiro como rótulo de log.
+        import src.meta_whatsapp as meta_whatsapp
+
+        if templates:
+            mensagem = templates[0]["mensagem"]
+            print(f"\nTemplate enviado ao lead: '{meta_whatsapp.META_TEMPLATE_NOME}' "
+                  f"({meta_whatsapp.META_TEMPLATE_IDIOMA}) — aprovado na Meta.")
+            print(f"Texto de log   : '{templates[0]['descricao']}' "
+                  f"(templates_whatsapp) — NÃO é enviado ao lead.")
+        else:
+            mensagem = f"[template Meta: {meta_whatsapp.META_TEMPLATE_NOME}]"
+            print(f"\nTemplate enviado ao lead: '{meta_whatsapp.META_TEMPLATE_NOME}' "
+                  f"({meta_whatsapp.META_TEMPLATE_IDIOMA}) — aprovado na Meta.")
+            print("Nenhum template no banco local: o log registrará o nome do "
+                  "template da Meta.")
+    else:
+        if not templates:
+            print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
+            db.close()
+            return
+        mensagem = _escolher_template(templates)
 
     # Fora do horário permitido não dá para enviar (nem teste).
     if not janela_aberta():
@@ -205,16 +251,26 @@ def enviar_whatsapp_menu():
         db.close()
         return
 
-    # Teto diário: mostra o consumo e bloqueia quando esgotado.
+    # Teto diário: mostra o consumo. Quando esgotado, PERGUNTA se quer
+    # continuar (execução manual). O teto existe para proteger o número de
+    # banimento por volume — então não é removido, só passa a ser explícito.
     enviados_hoje, restante_dia = resumo_limite_dia(db)
+    ignorar_limite_dia = False
     if restante_dia is not None:
         print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} enviados. "
               f"Restam {restante_dia}.")
         if restante_dia <= 0:
-            print(f"Limite diário atingido. Os envios voltam na próxima janela "
-                  f"({descrever_janela()}).")
-            db.close()
-            return
+            print(f"\nLimite diário atingido ({enviados_hoje}/{WAHA_LIMITE_DIA}).")
+            print("O teto diário existe para reduzir o risco de bloqueio do número.")
+            print("Continuar enviando hoje aumenta esse risco.")
+            if not _confirmar("Deseja continuar mesmo assim? (S/N): "):
+                print(f"Envio cancelado. Os envios voltam automaticamente na "
+                      f"próxima janela ({descrever_janela()}).")
+                db.close()
+                return
+            ignorar_limite_dia = True
+            restante_dia = None
+            print("Prosseguindo SEM o teto diário (decisão manual).\n")
 
     numero_f, cidade_f, nicho_f = _escolher_filtros()
 
@@ -275,6 +331,7 @@ def enviar_whatsapp_menu():
         intervalo=WAHA_INTERVALO,
         limite=quantidade,
         leads=pendentes,
+        ignorar_limite_dia=ignorar_limite_dia,
     )
     db.close()
 

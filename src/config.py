@@ -13,12 +13,30 @@ CAMINHO_ENV = os.path.join(PROJETO_RAIZ, ".env")
 def carregar_env(caminho=None):
     """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
 
-    Não sobrescreve variáveis que já existem no ambiente. Ignora linhas em
-    branco, comentários (#) e valores entre aspas.
+    O `.env` é AUTORITATIVO: se uma chave existe tanto no `.env` quanto no
+    ambiente do sistema, o valor do `.env` vence.
+
+    Por que essa escolha (e não o contrário)
+    ----------------------------------------
+    Antes usávamos "só define se ainda não existir no ambiente". Isso é o
+    comportamento 12-factor padrão, mas aqui é perigoso: uma variável esquecida
+    no shell (ex.: `WHATSAPP_PROVIDER=waha` exportada num teste) passava a
+    mandar SEM AVISO, trocando o canal de envio. Neste projeto isso significa
+    disparar campanha pelo WhatsApp não oficial em vez da API oficial — custo
+    errado, número errado e sem registro no Chatwoot.
+
+    Agora o `.env` sempre vence e um AVISO é impresso quando havia conflito,
+    para nunca haver troca silenciosa de comportamento.
+
+    Para sobrescrever de propósito, edite o `.env` (fonte única de verdade).
+
+    Ignora linhas em branco, comentários (#) e remove aspas dos valores.
     """
     caminho = caminho or CAMINHO_ENV
     if not os.path.isfile(caminho):
         return
+
+    conflitos = []
 
     with open(caminho, "r", encoding="utf-8-sig") as arquivo:
         for linha in arquivo:
@@ -28,8 +46,23 @@ def carregar_env(caminho=None):
             chave, _, valor = linha.partition("=")
             chave = chave.strip()
             valor = valor.strip().strip('"').strip("'")
-            if chave and chave not in os.environ:
-                os.environ[chave] = valor
+
+            if not chave:
+                continue
+
+            anterior = os.environ.get(chave)
+            if anterior is not None and anterior != valor:
+                conflitos.append((chave, anterior, valor))
+
+            os.environ[chave] = valor
+
+    # Aviso único e visível (não interrompe a execução).
+    for chave, anterior, novo in conflitos:
+        print(
+            f"Aviso: '{chave}' estava definida no ambiente do sistema "
+            f"({anterior!r}) e foi substituída pelo valor do .env ({novo!r}). "
+            f"O .env é a fonte de verdade."
+        )
 
 
 def str_para_bool(valor, padrao=False):

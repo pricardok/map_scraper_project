@@ -124,36 +124,78 @@ class LeadDatabase:
         return len(df)
 
     def get_leads_para_envio(self, limite=None, numero=None, cidade=None, nicho=None):
-        """Retorna leads ativos, celulares e ainda não enviados (evita spam/fixo).
+        """Retorna leads ativos, celulares e ainda não enviados.
 
         Filtros opcionais:
         - numero: filtra por telefone (completo ou parte; ignora não-dígitos)
         - cidade: filtra por nome exato da cidade
         - nicho:  filtra por nicho exato
+
+        ⚠️ DEDUPLICAÇÃO POR TELEFONE (importante para custo e anti-spam)
+        ---------------------------------------------------------------
+        A base tem o mesmo telefone em VÁRIAS linhas:
+
+        - Redes com filiais que compartilham o número (ex.: 4 unidades da
+          mesma barbearia em Niterói com o mesmo celular);
+        - O mesmo negócio raspado em dezenas de cidades diferentes
+          (medido: um número aparecia em 56 cidades).
+
+        Sem deduplicar, cada linha vira uma mensagem cobrada — e o dono do
+        número recebe a mesma campanha várias vezes, o que gera denúncia de
+        spam e derruba a qualidade do número oficial.
+
+        Regra aplicada:
+          1. UMA linha por telefone (DISTINCT ON);
+          2. exclui telefones que JÁ receberam envio com sucesso em QUALQUER
+             campanha anterior (independente de cidade/nicho/bairro).
+
+        A fonte de verdade do "já enviado" é `whatsapp_envios_log` (status
+        'enviado'), não `leads.status_whatsapp` — porque a marcação no lead
+        pode falhar ou ser feita em outra linha do mesmo telefone.
         """
         p = backend.ph()
+        expr_tel = "regexp_replace(COALESCE(l.telefone, ''), '[^0-9]', '', 'g')"
+
+        # Subconsulta: telefones já enviados com sucesso (1 linha por número).
+        sub_ja_enviados = f"""
+            SELECT DISTINCT regexp_replace(COALESCE(telefone, ''), '[^0-9]', '', 'g') AS tel
+            FROM whatsapp_envios_log
+            WHERE status = 'enviado'
+        """
+
         query = f"""
-            SELECT lead_id, nome, telefone, whatsapp_link, bairro, cidade, estado, nicho, chat_id_waha
-            FROM leads
-            WHERE status = 'ativo'
-              AND tipo_telefone = 'Celular'
-              AND (status_whatsapp IS NULL OR status_whatsapp = 'pendente')
+            SELECT DISTINCT ON ({expr_tel})
+                   l.lead_id, l.nome, l.telefone, l.whatsapp_link,
+                   l.bairro, l.cidade, l.estado, l.nicho, l.chat_id_waha
+            FROM leads l
+            WHERE l.status = 'ativo'
+              AND l.tipo_telefone = 'Celular'
+              AND (l.status_whatsapp IS NULL OR l.status_whatsapp = 'pendente')
+              AND {expr_tel} <> ''
+              AND {expr_tel} NOT IN ({sub_ja_enviados})
         """
         params = []
         if numero:
             numero = re.sub(r"\D", "", str(numero))
-            query += f" AND regexp_replace(telefone, '[^0-9]', '', 'g') LIKE {p}"
+            query += f" AND {expr_tel} LIKE {p}"
             params.append(f"%{numero}%")
         if cidade:
-            query += f" AND cidade = {p}"
+            query += f" AND l.cidade = {p}"
             params.append(cidade)
         if nicho:
-            query += f" AND nicho = {p}"
+            query += f" AND l.nicho = {p}"
             params.append(nicho)
-        query += " ORDER BY cidade, bairro, nome"
+
+        # DISTINCT ON exige que a ordem comece pela expressão do DISTINCT.
+        # Dentro de cada telefone, escolhe a linha mais estável (lead_id).
+        query += f" ORDER BY {expr_tel}, l.lead_id"
+
+        # O LIMIT precisa ser aplicado DEPOIS da deduplicação — por isso
+        # envolvemos em um SELECT externo.
         if limite:
-            query += f" LIMIT {p}"
+            query = f"SELECT * FROM ({query}) AS dedup LIMIT {p}"
             params.append(int(limite))
+
         return backend.query_df(self.conn, query, params)
 
     def salvar_chat_id_waha(self, nome, cidade, chat_id):
@@ -167,21 +209,55 @@ class LeadDatabase:
         """, [chat_id, nome, cidade])
         backend.commit(self.conn)
 
-    def marcar_envio(self, nome, cidade, status_whatsapp):
-        """Registra o resultado do envio. 'data_envio_whatsapp' é gravado apenas no sucesso."""
+    def marcar_envio(self, nome, cidade, status_whatsapp, lead_id=None, telefone=None):
+        """Registra o resultado do envio.
+
+        'data_envio_whatsapp' é gravado apenas no sucesso.
+
+        ⚠️ IDENTIFICAÇÃO DA LINHA (ordem de preferência)
+        ------------------------------------------------
+        1. `lead_id`    → chave primária, sempre correta
+        2. `telefone`   → marca TODAS as linhas com aquele número, o que é
+                          exatamente o desejado quando o mesmo celular aparece
+                          em várias linhas (redes com filiais, mesmo negócio
+                          raspado em cidades diferentes). Assim o número não
+                          volta na próxima campanha por outra linha.
+        3. nome+cidade  → legado; usado só quando nada mais é informado.
+
+        O `WHERE nome = ? AND cidade = ?` sozinho era frágil: não cobria o
+        mesmo telefone em outra cidade, então a campanha seguinte reenviava
+        para um número que já havia recebido a mensagem.
+        """
         p = backend.ph()
+
+        if lead_id is not None:
+            where = f"lead_id = {p}"
+            params_where = [lead_id]
+        elif telefone:
+            digitos = re.sub(r"\D", "", str(telefone))
+            if not digitos:
+                print("Aviso: marcar_envio sem telefone válido — usando nome+cidade.")
+                where = f"nome = {p} AND cidade = {p}"
+                params_where = [nome, cidade]
+            else:
+                where = (f"regexp_replace(COALESCE(telefone, ''), '[^0-9]', '', 'g') = {p}")
+                params_where = [digitos]
+        else:
+            where = f"nome = {p} AND cidade = {p}"
+            params_where = [nome, cidade]
+
         if status_whatsapp == 'enviado':
             backend.execute(self.conn, f"""
                 UPDATE leads
                 SET status_whatsapp = {p}, data_envio_whatsapp = {p}
-                WHERE nome = {p} AND cidade = {p}
-            """, [status_whatsapp, datetime.now(), nome, cidade])
+                WHERE {where}
+            """, [status_whatsapp, datetime.now()] + params_where)
         else:
             backend.execute(self.conn, f"""
                 UPDATE leads
                 SET status_whatsapp = {p}
-                WHERE nome = {p} AND cidade = {p}
-            """, [status_whatsapp, nome, cidade])
+                WHERE {where}
+            """, [status_whatsapp] + params_where)
         backend.commit(self.conn)
 
     def export_to_excel(self, nicho: str, cidade: str):
