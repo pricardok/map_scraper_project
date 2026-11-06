@@ -52,12 +52,14 @@ memory/
 src/
   __init__.py
   backend.py
+  chatwoot_registro.py
   coleta_auto.py
   config.py
   database.py
   localidades_db.py
   locations.py
   main.py
+  meta_whatsapp.py
   schema.py
   scraper.py
   utils.py
@@ -317,6 +319,683 @@ requirements.txt
 162:     )
 163:     params = [v for row in rows for v in row]
 164:     execute(conn, sql, params)
+````
+
+## File: src/chatwoot_registro.py
+````python
+  1: # src/chatwoot_registro.py
+  2: """Registra no Chatwoot os disparos de campanha feitos pelo map_scraper.
+  3: 
+  4: O PROBLEMA QUE ISSO RESOLVE
+  5: ---------------------------
+  6: Quando a Meta entrega uma mensagem de saída para o lead, o webhook só manda
+  7: `statuses` (sent/delivered/read) — NUNCA o conteúdo. Então o Chatwoot não tem
+  8: como saber que uma campanha foi enviada: não existe conversa para receber
+  9: aquela mensagem.
+ 10: 
+ 11: Resultado: o atendente abre o Chatwoot e não vê que o lead recebeu o `mkt_01`.
+ 12: 
+ 13: SOLUÇÃO
+ 14: -------
+ 15: Depois que a Meta aceita o envio, este módulo cria (ou reaproveita) a conversa
+ 16: do lead no Chatwoot e grava uma **NOTA PRIVADA**:
+ 17: 
+ 18:     📤 Campanha enviada — template `mkt_01`
+ 19:     wamid: wamid.HBgM...
+ 20: 
+ 21: Nota privada = o lead NÃO recebe nada. É registro interno para o atendente.
+ 22: 
+ 23: ⚠️ REGRA DE OURO: NUNCA criar conversa JÁ COM MENSAGEM
+ 24: ------------------------------------------------------
+ 25: `POST /conversations` com o campo `message` faz o Chatwoot **enviar** aquela
+ 26: mensagem ao lead. Como a campanha já foi enviada pela Meta, isso causaria
+ 27: **duplo envio** (e cobrança dupla). Por isso o fluxo é:
+ 28: 
+ 29:     1. POST /conversations          (sem `message`)
+ 30:     2. POST /conversations/{id}/messages  com `private: true`
+ 31: 
+ 32: Configuração (.env)
+ 33: -------------------
+ 34: CHATWOOT_REGISTRO_ATIVO   "true"                     liga/desliga o registro
+ 35: CHATWOOT_URL              "https://wps.agendamentoja.com"
+ 36: CHATWOOT_API_TOKEN        "HJm1..."                  Profile Settings → Token
+ 37: CHATWOOT_ACCOUNT_ID       "2"
+ 38: CHATWOOT_INBOX_ID         "1"
+ 39: CHATWOOT_CRIAR_CONVERSA   "true"   false = só anota em conversa que já existe
+ 40: CHATWOOT_TIMEOUT          "15"
+ 41: 
+ 42: Custo/efeito colateral
+ 43: ----------------------
+ 44: Criar conversa para CADA lead disparado enche a caixa de entrada. Se a base
+ 45: tem 45 mil leads, isso vira 45 mil conversas. Use `CHATWOOT_CRIAR_CONVERSA=false`
+ 46: se quiser anotar apenas em quem já conversou com você.
+ 47: """
+ 48: import os
+ 49: import re
+ 50: import logging
+ 51: 
+ 52: import requests
+ 53: 
+ 54: from src.config import carregar_env, env_int, str_para_bool
+ 55: 
+ 56: carregar_env()
+ 57: 
+ 58: logger = logging.getLogger(__name__)
+ 59: 
+ 60: CHATWOOT_REGISTRO_ATIVO = str_para_bool(
+ 61:     os.environ.get("CHATWOOT_REGISTRO_ATIVO"), padrao=False
+ 62: )
+ 63: CHATWOOT_URL = os.environ.get("CHATWOOT_URL", "").strip().rstrip("/")
+ 64: CHATWOOT_API_TOKEN = os.environ.get("CHATWOOT_API_TOKEN", "").strip()
+ 65: CHATWOOT_ACCOUNT_ID = os.environ.get("CHATWOOT_ACCOUNT_ID", "").strip()
+ 66: CHATWOOT_INBOX_ID = os.environ.get("CHATWOOT_INBOX_ID", "").strip()
+ 67: CHATWOOT_CRIAR_CONVERSA = str_para_bool(
+ 68:     os.environ.get("CHATWOOT_CRIAR_CONVERSA"), padrao=True
+ 69: )
+ 70: CHATWOOT_TIMEOUT = env_int("CHATWOOT_TIMEOUT", 15) or 15
+ 71: 
+ 72: # Cache em memória: telefone normalizado -> contact_id do Chatwoot.
+ 73: # Evita 2-3 chamadas HTTP por lead quando o mesmo número se repete na campanha.
+ 74: _cache_contato = {}
+ 75: 
+ 76: 
+ 77: def configurado():
+ 78:     """True quando há URL, token, account e inbox — mínimo para registrar."""
+ 79:     return bool(
+ 80:         CHATWOOT_URL and CHATWOOT_API_TOKEN
+ 81:         and CHATWOOT_ACCOUNT_ID and CHATWOOT_INBOX_ID
+ 82:     )
+ 83: 
+ 84: 
+ 85: def ativo():
+ 86:     """True quando o registro está ligado E configurado."""
+ 87:     return CHATWOOT_REGISTRO_ATIVO and configurado()
+ 88: 
+ 89: 
+ 90: def descrever():
+ 91:     """Texto curto para o menu."""
+ 92:     if not configurado():
+ 93:         return "Chatwoot — NÃO CONFIGURADO (faltam URL/token/account/inbox)"
+ 94:     if not CHATWOOT_REGISTRO_ATIVO:
+ 95:         return "Chatwoot — desativado (CHATWOOT_REGISTRO_ATIVO=false)"
+ 96:     modo = "cria conversa" if CHATWOOT_CRIAR_CONVERSA else "só conversa existente"
+ 97:     return f"Chatwoot — ativo ({modo}), inbox_id={CHATWOOT_INBOX_ID}"
+ 98: 
+ 99: 
+100: def normalizar_telefone(telefone):
+101:     """'51985171688' -> '+5551985171688' (E.164, formato aceito pelo Chatwoot)."""
+102:     digitos = re.sub(r"\D", "", str(telefone or ""))
+103:     if not digitos:
+104:         return None
+105:     if digitos.startswith("55") and len(digitos) in (12, 13):
+106:         return f"+{digitos}"
+107:     if len(digitos) in (10, 11):
+108:         return f"+55{digitos}"
+109:     return None
+110: 
+111: 
+112: class _Cliente:
+113:     """Cliente HTTP mínimo da API do Chatwoot."""
+114: 
+115:     def __init__(self):
+116:         self.base = f"{CHATWOOT_URL}/api/v1/accounts/{CHATWOOT_ACCOUNT_ID}"
+117:         self.headers = {
+118:             "api_access_token": CHATWOOT_API_TOKEN,
+119:             "Content-Type": "application/json",
+120:             "Accept": "application/json",
+121:         }
+122: 
+123:     def get(self, caminho, params=None):
+124:         return requests.get(
+125:             f"{self.base}{caminho}", headers=self.headers,
+126:             params=params or {}, timeout=CHATWOOT_TIMEOUT,
+127:         )
+128: 
+129:     def post(self, caminho, json):
+130:         return requests.post(
+131:             f"{self.base}{caminho}", headers=self.headers,
+132:             json=json, timeout=CHATWOOT_TIMEOUT,
+133:         )
+134: 
+135: 
+136: def variantes_telefone(telefone):
+137:     """Gera as variantes E.164 brasileiras (com e sem o nono dígito).
+138: 
+139:     ⚠️ MOTIVO: o MESMO lead pode existir no Chatwoot com dois telefones:
+140: 
+141:         +5551982824693   (com o 9 — formato do banco de leads / mkt_01)
+142:         +555182824693    (sem o 9 — é o `wa_id` que a Meta reporta no webhook)
+143: 
+144:     Se buscarmos só uma variante, criamos um CONTATO DUPLICADO para a mesma
+145:     pessoa — e o histórico da conversa fica partido em dois.
+146: 
+147:     Returns:
+148:         Lista com 1 ou 2 variantes E.164 (+55...), a do banco primeiro.
+149:     """
+150:     e164 = normalizar_telefone(telefone)
+151:     if not e164:
+152:         return []
+153: 
+154:     digitos = e164.lstrip("+")
+155:     variantes = [e164]
+156: 
+157:     base = digitos[2:] if digitos.startswith("55") else digitos
+158:     if len(base) == 11 and base[2] == "9":
+159:         # 11 dígitos com o 9 → variante legada de 10 (remove o 9 do índice 2)
+160:         variantes.append(f"+55{base[:2]}{base[3:]}")
+161:     elif len(base) == 10:
+162:         # 10 dígitos sem o 9 → variante moderna de 11 (insere o 9 no índice 2,
+163:         # preservando os 8 dígitos finais)
+164:         variantes.append(f"+55{base[:2]}9{base[2:]}")
+165: 
+166:     return variantes
+167: 
+168: 
+169: def _buscar_contatos_candidatos(cliente, telefone_e164):
+170:     """Retorna TODOS os contact_ids que casam com as variantes do telefone.
+171: 
+172:     Pode haver mais de um (contato duplicado: um com o 9, outro sem). Quem
+173:     chama decide qual usar — normalmente o que já tem conversa.
+174:     """
+175:     chave = telefone_e164
+176:     if chave in _cache_contato:
+177:         return [_cache_contato[chave]]
+178: 
+179:     encontrados = []
+180: 
+181:     for variante in variantes_telefone(telefone_e164):
+182:         try:
+183:             r = cliente.get("/contacts/search", {"q": variante})
+184:             if r.status_code != 200:
+185:                 continue
+186:             dados = r.json() or {}
+187:             for contato in dados.get("payload") or []:
+188:                 if (contato.get("phone_number") or "") == variante:
+189:                     contact_id = contato.get("id")
+190:                     if contact_id and contact_id not in encontrados:
+191:                         encontrados.append(contact_id)
+192:         except requests.RequestException as e:
+193:             logger.debug("[CHATWOOT] erro ao buscar contato (%s): %s", variante, e)
+194: 
+195:     return encontrados
+196: 
+197: 
+198: def _buscar_contato(cliente, telefone_e164):
+199:     """Retorna o contact_id mais adequado (prefere quem já tem conversa).
+200: 
+201:     Retorna None quando não existe. Não cria nada.
+202:     """
+203:     chave = telefone_e164
+204:     if chave in _cache_contato:
+205:         return _cache_contato[chave]
+206: 
+207:     candidatos = _buscar_contatos_candidatos(cliente, telefone_e164)
+208:     if not candidatos:
+209:         return None
+210: 
+211:     escolhido = candidatos[0]
+212:     if len(candidatos) > 1:
+213:         # Contato duplicado: fica com o que já tem conversa (preserva histórico).
+214:         for cid in candidatos:
+215:             if _buscar_conversa(cliente, cid):
+216:                 escolhido = cid
+217:                 break
+218:         logger.info(
+219:             "[CHATWOOT] %d contatos para %s — usando id=%s",
+220:             len(candidatos), chave, escolhido,
+221:         )
+222: 
+223:     for v in variantes_telefone(telefone_e164):
+224:         _cache_contato[v] = escolhido
+225: 
+226:     return escolhido
+227: 
+228: 
+229: def _criar_contato(cliente, nome, telefone_e164):
+230:     """Cria o contato no Chatwoot. Retorna contact_id ou None."""
+231:     try:
+232:         r = cliente.post("/contacts", {
+233:             "name": nome or telefone_e164,
+234:             "phone_number": telefone_e164,
+235:             "inbox_id": int(CHATWOOT_INBOX_ID),
+236:         })
+237:         if r.status_code in (200, 201):
+238:             dados = r.json() or {}
+239:             payload = dados.get("payload") or {}
+240:             contact_id = payload.get("contact", {}).get("id") or payload.get("id")
+241:             if contact_id:
+242:                 _cache_contato[telefone_e164] = contact_id
+243:                 return contact_id
+244:         logger.debug("[CHATWOOT] criar contato HTTP %s", r.status_code)
+245:     except requests.RequestException as e:
+246:         logger.debug("[CHATWOOT] erro ao criar contato: %s", e)
+247:     return None
+248: 
+249: 
+250: def _buscar_conversa(cliente, contact_id):
+251:     """Retorna a conversa mais recente (não resolvida) do contato, ou None."""
+252:     try:
+253:         r = cliente.get(
+254:             f"/contacts/{contact_id}/conversations",
+255:         )
+256:         if r.status_code == 200:
+257:             dados = r.json() or {}
+258:             payload = dados.get("payload") or []
+259:             abertas = [c for c in payload if c.get("status") != "resolved"]
+260:             if abertas:
+261:                 return abertas[0].get("id")
+262:             if payload:
+263:                 return payload[0].get("id")
+264:     except requests.RequestException as e:
+265:         logger.debug("[CHATWOOT] erro ao buscar conversa: %s", e)
+266:     return None
+267: 
+268: 
+269: def _obter_source_id(cliente, contact_id, telefone_e164):
+270:     """Descobre o `source_id` real do contato para o nosso inbox.
+271: 
+272:     ⚠️ POR QUE ISSO IMPORTA
+273:     ----------------------
+274:     O `source_id` não é necessariamente o telefone que calculamos. Ele depende
+275:     de como o contato foi criado no Chatwoot:
+276: 
+277:         bridge (Meta webhook) -> '555182824693'   (wa_id, SEM o nono dígito)
+278:         map_scraper           -> '5551982824693'  (com o nono dígito)
+279:         cadastro manual       -> pode ser outro
+280: 
+281:     Criar a conversa com um `source_id` que não existe no contato retorna
+282:     404 "Resource could not be found". Por isso lemos o `contact_inboxes`
+283:     do próprio contato e usamos o que está lá.
+284: 
+285:     Returns:
+286:         str com o source_id, ou None se não encontrado.
+287:     """
+288:     try:
+289:         r = cliente.get(f"/contacts/{contact_id}")
+290:         if r.status_code == 200:
+291:             dados = (r.json() or {}).get("payload") or {}
+292:             caixas = dados.get("contact_inboxes") or []
+293:             # Prefere o source_id do nosso inbox; cai para o primeiro.
+294:             for caixa in caixas:
+295:                 inbox = caixa.get("inbox") or {}
+296:                 if str(inbox.get("id")) == str(CHATWOOT_INBOX_ID):
+297:                     sid = caixa.get("source_id")
+298:                     if sid:
+299:                         return str(sid)
+300:             for caixa in caixas:
+301:                 sid = caixa.get("source_id")
+302:                 if sid:
+303:                     return str(sid)
+304:     except requests.RequestException as e:
+305:         logger.debug("[CHATWOOT] erro ao obter source_id: %s", e)
+306: 
+307:     # Fallback: dígitos do telefone (funciona para contatos que nós criamos)
+308:     digitos = re.sub(r"\D", "", str(telefone_e164 or ""))
+309:     return digitos or None
+310: 
+311: 
+312: def _criar_conversa(cliente, contact_id, telefone_e164):
+313:     """Cria a conversa SEM mensagem inicial (evita envio ao lead).
+314: 
+315:     ⚠️ O `source_id` de um inbox WhatsApp Cloud precisa ser **apenas dígitos**:
+316: 
+317:         \\A(?:\\d{1,15}|[A-Z]{2}\\.(?:ENT\\.)?[A-Za-z0-9]{1,128})\\z
+318: 
+319:     Mandar o E.164 com '+' retorna:
+320:         422 "Source invalid source id for whatsapp inbox"
+321: 
+322:     E o valor precisa existir nos `contact_inboxes` do contato — daí
+323:     `_obter_source_id()`.
+324:     """
+325:     source_id = _obter_source_id(cliente, contact_id, telefone_e164)
+326:     if not source_id:
+327:         logger.debug("[CHATWOOT] sem source_id para contato %s", contact_id)
+328:         return None
+329: 
+330:     try:
+331:         r = cliente.post("/conversations", {
+332:             "source_id": source_id,
+333:             "inbox_id": int(CHATWOOT_INBOX_ID),
+334:             "contact_id": contact_id,
+335:             # ⚠️ SEM 'message': com message o Chatwoot ENVIA ao lead (duplo envio).
+336:         })
+337:         if r.status_code in (200, 201):
+338:             return (r.json() or {}).get("id")
+339:         logger.debug("[CHATWOOT] criar conversa HTTP %s: %s",
+340:                      r.status_code, (r.text or "")[:300])
+341:     except requests.RequestException as e:
+342:         logger.debug("[CHATWOOT] erro ao criar conversa: %s", e)
+343:     return None
+344: 
+345: 
+346: def _criar_nota(cliente, conversa_id, texto):
+347:     """Grava uma nota PRIVADA na conversa (o lead não recebe nada)."""
+348:     try:
+349:         r = cliente.post(f"/conversations/{conversa_id}/messages", {
+350:             "content": texto,
+351:             "message_type": "outgoing",
+352:             "private": True,
+353:         })
+354:         return 200 <= r.status_code < 300
+355:     except requests.RequestException as e:
+356:         logger.debug("[CHATWOOT] erro ao criar nota: %s", e)
+357:         return False
+358: 
+359: 
+360: def registrar_envio(lead, template_nome, wamid=None, mensagem_log=None):
+361:     """Registra o disparo no Chatwoot como nota privada.
+362: 
+363:     Args:
+364:         lead: linha do DataFrame de leads (precisa de nome/telefone)
+365:         template_nome: nome do template aprovado enviado
+366:         wamid: id da mensagem retornado pela Meta (útil para rastreio)
+367:         mensagem_log: texto do template do banco (só para a nota)
+368: 
+369:     Returns:
+370:         True se registrou, False caso contrário.
+371: 
+372:     NUNCA levanta exceção: falha no Chatwoot não pode derrubar a campanha.
+373:     """
+374:     if not ativo():
+375:         return False
+376: 
+377:     telefone_e164 = normalizar_telefone(
+378:         lead.get("telefone") if hasattr(lead, "get") else None
+379:     )
+380:     if not telefone_e164:
+381:         return False
+382: 
+383:     nome = ""
+384:     try:
+385:         nome = str(lead.get("nome") or "").strip()
+386:     except Exception:
+387:         pass
+388: 
+389:     cliente = _Cliente()
+390: 
+391:     try:
+392:         contact_id = _buscar_contato(cliente, telefone_e164)
+393:         if not contact_id:
+394:             contact_id = _criar_contato(cliente, nome, telefone_e164)
+395:         if not contact_id:
+396:             logger.debug("[CHATWOOT] não foi possível obter contato de %s", telefone_e164)
+397:             return False
+398: 
+399:         conversa_id = _buscar_conversa(cliente, contact_id)
+400: 
+401:         if not conversa_id:
+402:             if not CHATWOOT_CRIAR_CONVERSA:
+403:                 # Modo econômico: não cria conversa nova.
+404:                 return False
+405:             conversa_id = _criar_conversa(cliente, contact_id, telefone_e164)
+406:             if not conversa_id:
+407:                 return False
+408: 
+409:         linhas = [f"📤 **Campanha enviada** — template `{template_nome}`"]
+410:         if mensagem_log:
+411:             resumo = str(mensagem_log).strip().replace("\n", " ")
+412:             if len(resumo) > 180:
+413:                 resumo = resumo[:180] + "…"
+414:             linhas.append(f"\n_{resumo}_")
+415:         if wamid:
+416:             linhas.append(f"\n`{wamid}`")
+417: 
+418:         return _criar_nota(cliente, conversa_id, "\n".join(linhas))
+419: 
+420:     except Exception as e:
+421:         logger.warning("[CHATWOOT] Falha ao registrar envio (ignorado): %s", e)
+422:         return False
+````
+
+## File: src/meta_whatsapp.py
+````python
+  1: # src/meta_whatsapp.py
+  2: """Envio de WhatsApp pela API OFICIAL da Meta (Cloud API) — provedor padrão.
+  3: 
+  4: Por que existe
+  5: --------------
+  6: O map_scraper originalmente só falava com a WAHA (WhatsApp Web não oficial).
+  7: Para disparar campanhas pelo número oficial (+55 51 8151-6260) é preciso usar
+  8: a Graph API da Meta com um **template aprovado** — mensagem de texto livre só
+  9: funciona dentro da janela de 24h após o lead responder.
+ 10: 
+ 11: Diferença fundamental em relação à WAHA
+ 12: ---------------------------------------
+ 13:     WAHA          -> manda TEXTO livre (o `templates_whatsapp` do banco)
+ 14:     Meta (oficial)-> manda TEMPLATE aprovado (identificado por NOME)
+ 15: 
+ 16: Ou seja: com `WHATSAPP_PROVIDER=meta` o campo `mensagem` do template do banco
+ 17: NÃO é enviado — quem define o conteúdo é o template aprovado na Meta.
+ 18: O texto do banco continua útil para o log (`whatsapp_envios_log.mensagem`).
+ 19: 
+ 20: Configuração (.env)
+ 21: -------------------
+ 22: META_ACCESS_TOKEN      "EAA..."            token permanente (System User)
+ 23: META_PHONE_NUMBER_ID   "1121736814366847"  ID do número oficial
+ 24: META_API_VERSION       "v25.0"            (opcional)
+ 25: META_TEMPLATE_NOME     "mkt_01"           template aprovado a usar
+ 26: META_TEMPLATE_IDIOMA   "pt_BR"            (opcional, padrão pt_BR)
+ 27: META_TEMPLATE_PARAMS   ""                 (opcional) CSV de campos do lead
+ 28:                                           enviados como parâmetros do corpo.
+ 29:                                           Vazio = template sem variáveis
+ 30:                                           (é o caso do mkt_01).
+ 31:                                           Ex.: "nome,cidade"
+ 32: META_TIMEOUT           "30"               (opcional)
+ 33: 
+ 34: Telefone
+ 35: --------
+ 36: O banco de leads guarda SEM o código do país:  '51985171688'
+ 37: A Meta exige COM o código do país e sem '+':   '5551985171688'
+ 38: `formatar_telefone_meta()` faz essa conversão e valida o DDD.
+ 39: """
+ 40: import os
+ 41: import re
+ 42: import logging
+ 43: 
+ 44: import requests
+ 45: 
+ 46: from src.config import carregar_env, env_int
+ 47: 
+ 48: carregar_env()
+ 49: 
+ 50: logger = logging.getLogger(__name__)
+ 51: 
+ 52: META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "").strip()
+ 53: META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "").strip()
+ 54: META_API_VERSION = os.environ.get("META_API_VERSION", "v25.0").strip() or "v25.0"
+ 55: 
+ 56: META_TEMPLATE_NOME = os.environ.get("META_TEMPLATE_NOME", "").strip()
+ 57: META_TEMPLATE_IDIOMA = os.environ.get("META_TEMPLATE_IDIOMA", "pt_BR").strip() or "pt_BR"
+ 58: META_TEMPLATE_PARAMS = os.environ.get("META_TEMPLATE_PARAMS", "").strip()
+ 59: 
+ 60: META_TIMEOUT = env_int("META_TIMEOUT", 30) or 30
+ 61: 
+ 62: # DDDs brasileiros válidos — evita chamar a Meta com número inválido
+ 63: # (que gastaria uma tentativa e poluiria a qualidade do número).
+ 64: _DDD_VALIDOS = {
+ 65:     '11', '12', '13', '14', '15', '16', '17', '18', '19',
+ 66:     '21', '22', '24', '27', '28',
+ 67:     '31', '32', '33', '34', '35', '37', '38',
+ 68:     '41', '42', '43', '44', '45', '46', '47', '48', '49',
+ 69:     '51', '53', '54', '55',
+ 70:     '61', '62', '63', '64', '65', '66', '67', '68', '69',
+ 71:     '71', '73', '74', '75', '77', '79',
+ 72:     '81', '82', '83', '84', '85', '86', '87', '88', '89',
+ 73:     '91', '92', '93', '94', '95', '96', '97', '98', '99',
+ 74: }
+ 75: 
+ 76: 
+ 77: def configurado():
+ 78:     """True quando há token e phone_number_id — pré-requisito para enviar."""
+ 79:     return bool(META_ACCESS_TOKEN and META_PHONE_NUMBER_ID)
+ 80: 
+ 81: 
+ 82: def template_configurado():
+ 83:     """True quando um template foi informado no .env."""
+ 84:     return bool(META_TEMPLATE_NOME)
+ 85: 
+ 86: 
+ 87: def descrever():
+ 88:     """Texto curto para exibir no menu (sem vazar o token)."""
+ 89:     if not configurado():
+ 90:         return "Meta API oficial — NÃO CONFIGURADA (faltam META_ACCESS_TOKEN / META_PHONE_NUMBER_ID)"
+ 91:     if not template_configurado():
+ 92:         return "Meta API oficial — configurada, mas META_TEMPLATE_NOME vazio"
+ 93:     return (
+ 94:         f"Meta API oficial — template '{META_TEMPLATE_NOME}' ({META_TEMPLATE_IDIOMA}), "
+ 95:         f"phone_number_id={META_PHONE_NUMBER_ID}"
+ 96:     )
+ 97: 
+ 98: 
+ 99: def formatar_telefone_meta(telefone):
+100:     """Converte '51985171688' / '(51) 98517-1688' no formato da Meta.
+101: 
+102:     Retorna '5551985171688' (com 55, sem '+') ou None se inválido.
+103: 
+104:     A Meta aceita o número com ou sem o nono dígito — ela própria resolve o
+105:     `wa_id` final. Aqui só garantimos país + DDD válido + tamanho plausível.
+106:     """
+107:     if not telefone:
+108:         return None
+109: 
+110:     digitos = re.sub(r"\D", "", str(telefone))
+111:     if not digitos:
+112:         return None
+113: 
+114:     # Remove o DDI 55 se já vier junto
+115:     if digitos.startswith("55") and len(digitos) in (12, 13):
+116:         digitos = digitos[2:]
+117: 
+118:     if len(digitos) not in (10, 11):
+119:         return None
+120: 
+121:     if digitos[:2] not in _DDD_VALIDOS:
+122:         return None
+123: 
+124:     return f"55{digitos}"
+125: 
+126: 
+127: def _params_do_lead(lead, template_params_csv=None):
+128:     """Monta a lista de parâmetros do corpo do template a partir do lead.
+129: 
+130:     `META_TEMPLATE_PARAMS` é um CSV de chaves do DataFrame de leads:
+131:         META_TEMPLATE_PARAMS=nome,cidade
+132:     produz ["Barbearia X", "Porto Alegre"].
+133: 
+134:     Vazio → retorna None (template sem variáveis, como o mkt_01).
+135:     """
+136:     bruto = (template_params_csv if template_params_csv is not None
+137:              else META_TEMPLATE_PARAMS)
+138:     if not bruto:
+139:         return None
+140: 
+141:     chaves = [c.strip() for c in bruto.split(",") if c.strip()]
+142:     if not chaves:
+143:         return None
+144: 
+145:     valores = []
+146:     for chave in chaves:
+147:         valor = lead.get(chave) if hasattr(lead, "get") else None
+148:         valores.append("" if valor is None else str(valor))
+149: 
+150:     return valores or None
+151: 
+152: 
+153: def montar_payload(telefone, template_nome=None, idioma=None, body_params=None):
+154:     """Monta o JSON de envio de template da Graph API."""
+155:     template_nome = template_nome or META_TEMPLATE_NOME
+156:     idioma = idioma or META_TEMPLATE_IDIOMA
+157: 
+158:     template = {
+159:         "name": template_nome,
+160:         "language": {"code": idioma},
+161:     }
+162: 
+163:     if body_params:
+164:         template["components"] = [{
+165:             "type": "body",
+166:             "parameters": [
+167:                 {"type": "text", "text": str(p)}
+168:                 for p in body_params
+169:             ],
+170:         }]
+171: 
+172:     return {
+173:         "messaging_product": "whatsapp",
+174:         "recipient_type": "individual",
+175:         "to": formatar_telefone_meta(telefone),
+176:         "type": "template",
+177:         "template": template,
+178:     }
+179: 
+180: 
+181: def enviar_template(telefone, template_nome=None, idioma=None, body_params=None):
+182:     """Envia um template aprovado pela API oficial da Meta.
+183: 
+184:     Returns:
+185:         dict com {status_code, ok, wamid, response, erro}
+186: 
+187:     Nunca levanta exceção: devolve `ok=False` e o motivo em `erro`. Isso é
+188:     proposital — a campanha precisa continuar para os outros leads mesmo que
+189:     um número esteja inválido ou a Meta recuse.
+190:     """
+191:     if not configurado():
+192:         return {
+193:             "status_code": None, "ok": False, "wamid": None, "response": None,
+194:             "erro": "META_ACCESS_TOKEN / META_PHONE_NUMBER_ID não configurados",
+195:         }
+196: 
+197:     destino = formatar_telefone_meta(telefone)
+198:     if not destino:
+199:         return {
+200:             "status_code": None, "ok": False, "wamid": None, "response": None,
+201:             "erro": f"telefone inválido para a Meta: {telefone!r}",
+202:         }
+203: 
+204:     payload = montar_payload(destino, template_nome, idioma, body_params)
+205:     url = f"https://graph.facebook.com/{META_API_VERSION}/{META_PHONE_NUMBER_ID}/messages"
+206:     headers = {
+207:         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+208:         "Content-Type": "application/json",
+209:     }
+210: 
+211:     try:
+212:         resposta = requests.post(url, json=payload, headers=headers, timeout=META_TIMEOUT)
+213:     except requests.RequestException as e:
+214:         return {
+215:             "status_code": None, "ok": False, "wamid": None, "response": None,
+216:             "erro": f"{type(e).__name__}: {e}",
+217:         }
+218: 
+219:     corpo = None
+220:     try:
+221:         corpo = resposta.json()
+222:     except Exception:
+223:         corpo = resposta.text
+224: 
+225:     wamid = None
+226:     if isinstance(corpo, dict):
+227:         mensagens = corpo.get("messages") or []
+228:         if mensagens:
+229:             wamid = mensagens[0].get("id")
+230: 
+231:     ok = 200 <= resposta.status_code < 300
+232: 
+233:     erro = None
+234:     if not ok:
+235:         if isinstance(corpo, dict):
+236:             e = corpo.get("error") or {}
+237:             erro = f"HTTP {resposta.status_code}: {e.get('message') or corpo}"
+238:         else:
+239:             erro = f"HTTP {resposta.status_code}: {str(corpo)[:300]}"
+240: 
+241:     return {
+242:         "status_code": resposta.status_code,
+243:         "ok": ok,
+244:         "wamid": wamid,
+245:         "response": corpo,
+246:         "erro": erro,
+247:     }
 ````
 
 ## File: src/utils.py
@@ -639,94 +1318,6 @@ requirements.txt
 204:     main()
 ````
 
-## File: src/config.py
-````python
- 1: # src/config.py
- 2: """Carregamento centralizado do arquivo .env, leitura de flags e conexão com o banco.
- 3: 
- 4: Todos os módulos importam este arquivo, então o `.env` é lido uma única vez
- 5: por processo, antes de qualquer constante de configuração ser calculada.
- 6: """
- 7: import os
- 8: 
- 9: PROJETO_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-10: CAMINHO_ENV = os.path.join(PROJETO_RAIZ, ".env")
-11: 
-12: 
-13: def carregar_env(caminho=None):
-14:     """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
-15: 
-16:     Não sobrescreve variáveis que já existem no ambiente. Ignora linhas em
-17:     branco, comentários (#) e valores entre aspas.
-18:     """
-19:     caminho = caminho or CAMINHO_ENV
-20:     if not os.path.isfile(caminho):
-21:         return
-22: 
-23:     with open(caminho, "r", encoding="utf-8-sig") as arquivo:
-24:         for linha in arquivo:
-25:             linha = linha.strip()
-26:             if not linha or linha.startswith("#") or "=" not in linha:
-27:                 continue
-28:             chave, _, valor = linha.partition("=")
-29:             chave = chave.strip()
-30:             valor = valor.strip().strip('"').strip("'")
-31:             if chave and chave not in os.environ:
-32:                 os.environ[chave] = valor
-33: 
-34: 
-35: def str_para_bool(valor, padrao=False):
-36:     """Converte strings comuns de booleano ('true', '1', 'sim', 's', 'yes') em bool."""
-37:     if valor is None:
-38:         return padrao
-39:     return str(valor).strip().lower() in ("1", "true", "yes", "s", "sim", "on")
-40: 
-41: 
-42: def env_int(nome, padrao):
-43:     """Lê uma variável de ambiente inteira, com fallback para o padrão."""
-44:     valor = os.environ.get(nome, "").strip()
-45:     if not valor:
-46:         return padrao
-47:     try:
-48:         return int(float(valor))
-49:     except ValueError:
-50:         return padrao
-51: 
-52: 
-53: # Lido no import: qualquer módulo que importe `src.config` já tem o .env aplicado.
-54: carregar_env()
-55: 
-56: # ---------------------------------------------------------------------------
-57: # Banco de dados — engine independente (PostgreSQL ou DuckDB)
-58: # ---------------------------------------------------------------------------
-59: # Escolha do backend:
-60: #   DB_ENGINE=postgres  -> PostgreSQL (DATABASE_URL ou DB_*)
-61: #   DB_ENGINE=duckdb    -> DuckDB local (DUCKDB_PATH)
-62: #
-63: # Se DB_ENGINE não for definido, a inferência é:
-64: #   DUCKDB_PATH  definido -> duckdb
-65: #   DATABASE_URL definido -> postgres
-66: #   nenhum dos dois       -> duckdb (padrão local/offline)
-67: DATABASE_URL = os.environ.get("DATABASE_URL", "")
-68: DUCKDB_PATH = os.environ.get("DUCKDB_PATH", "data/leads.duckdb")
-69: 
-70: DB_ENGINE = os.environ.get("DB_ENGINE", "").strip().lower()
-71: if DB_ENGINE not in ("postgres", "duckdb"):
-72:     if os.environ.get("DUCKDB_PATH"):
-73:         DB_ENGINE = "duckdb"
-74:     elif os.environ.get("DATABASE_URL"):
-75:         DB_ENGINE = "postgres"
-76:     else:
-77:         DB_ENGINE = "duckdb"
-78: 
-79: # Configuração do PostgreSQL (usada apenas quando DB_ENGINE=postgres).
-80: DB_HOST = os.environ.get("DB_HOST", "localhost")
-81: DB_PORT = env_int("DB_PORT", 5432)
-82: DB_NAME = os.environ.get("DB_NAME", "leads_db")
-83: DB_USER = os.environ.get("DB_USER", "leads_app")
-84: DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
-````
-
 ## File: .repomixignore
 ````
  1: # Add patterns to ignore here, one per line
@@ -952,6 +1543,127 @@ requirements.txt
 76: ```powershell
 77: git add -A; git commit -m "sync local $(Get-Date -Format 'yyyy-MM-dd HH:mm')"; git push --force-with-lease origin main
 78: ```
+````
+
+## File: src/config.py
+````python
+  1: # src/config.py
+  2: """Carregamento centralizado do arquivo .env, leitura de flags e conexão com o banco.
+  3: 
+  4: Todos os módulos importam este arquivo, então o `.env` é lido uma única vez
+  5: por processo, antes de qualquer constante de configuração ser calculada.
+  6: """
+  7: import os
+  8: 
+  9: PROJETO_RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ 10: CAMINHO_ENV = os.path.join(PROJETO_RAIZ, ".env")
+ 11: 
+ 12: 
+ 13: def carregar_env(caminho=None):
+ 14:     """Carrega variáveis de um arquivo .env (formato CHAVE=VALOR).
+ 15: 
+ 16:     O `.env` é AUTORITATIVO: se uma chave existe tanto no `.env` quanto no
+ 17:     ambiente do sistema, o valor do `.env` vence.
+ 18: 
+ 19:     Por que essa escolha (e não o contrário)
+ 20:     ----------------------------------------
+ 21:     Antes usávamos "só define se ainda não existir no ambiente". Isso é o
+ 22:     comportamento 12-factor padrão, mas aqui é perigoso: uma variável esquecida
+ 23:     no shell (ex.: `WHATSAPP_PROVIDER=waha` exportada num teste) passava a
+ 24:     mandar SEM AVISO, trocando o canal de envio. Neste projeto isso significa
+ 25:     disparar campanha pelo WhatsApp não oficial em vez da API oficial — custo
+ 26:     errado, número errado e sem registro no Chatwoot.
+ 27: 
+ 28:     Agora o `.env` sempre vence e um AVISO é impresso quando havia conflito,
+ 29:     para nunca haver troca silenciosa de comportamento.
+ 30: 
+ 31:     Para sobrescrever de propósito, edite o `.env` (fonte única de verdade).
+ 32: 
+ 33:     Ignora linhas em branco, comentários (#) e remove aspas dos valores.
+ 34:     """
+ 35:     caminho = caminho or CAMINHO_ENV
+ 36:     if not os.path.isfile(caminho):
+ 37:         return
+ 38: 
+ 39:     conflitos = []
+ 40: 
+ 41:     with open(caminho, "r", encoding="utf-8-sig") as arquivo:
+ 42:         for linha in arquivo:
+ 43:             linha = linha.strip()
+ 44:             if not linha or linha.startswith("#") or "=" not in linha:
+ 45:                 continue
+ 46:             chave, _, valor = linha.partition("=")
+ 47:             chave = chave.strip()
+ 48:             valor = valor.strip().strip('"').strip("'")
+ 49: 
+ 50:             if not chave:
+ 51:                 continue
+ 52: 
+ 53:             anterior = os.environ.get(chave)
+ 54:             if anterior is not None and anterior != valor:
+ 55:                 conflitos.append((chave, anterior, valor))
+ 56: 
+ 57:             os.environ[chave] = valor
+ 58: 
+ 59:     # Aviso único e visível (não interrompe a execução).
+ 60:     for chave, anterior, novo in conflitos:
+ 61:         print(
+ 62:             f"Aviso: '{chave}' estava definida no ambiente do sistema "
+ 63:             f"({anterior!r}) e foi substituída pelo valor do .env ({novo!r}). "
+ 64:             f"O .env é a fonte de verdade."
+ 65:         )
+ 66: 
+ 67: 
+ 68: def str_para_bool(valor, padrao=False):
+ 69:     """Converte strings comuns de booleano ('true', '1', 'sim', 's', 'yes') em bool."""
+ 70:     if valor is None:
+ 71:         return padrao
+ 72:     return str(valor).strip().lower() in ("1", "true", "yes", "s", "sim", "on")
+ 73: 
+ 74: 
+ 75: def env_int(nome, padrao):
+ 76:     """Lê uma variável de ambiente inteira, com fallback para o padrão."""
+ 77:     valor = os.environ.get(nome, "").strip()
+ 78:     if not valor:
+ 79:         return padrao
+ 80:     try:
+ 81:         return int(float(valor))
+ 82:     except ValueError:
+ 83:         return padrao
+ 84: 
+ 85: 
+ 86: # Lido no import: qualquer módulo que importe `src.config` já tem o .env aplicado.
+ 87: carregar_env()
+ 88: 
+ 89: # ---------------------------------------------------------------------------
+ 90: # Banco de dados — engine independente (PostgreSQL ou DuckDB)
+ 91: # ---------------------------------------------------------------------------
+ 92: # Escolha do backend:
+ 93: #   DB_ENGINE=postgres  -> PostgreSQL (DATABASE_URL ou DB_*)
+ 94: #   DB_ENGINE=duckdb    -> DuckDB local (DUCKDB_PATH)
+ 95: #
+ 96: # Se DB_ENGINE não for definido, a inferência é:
+ 97: #   DUCKDB_PATH  definido -> duckdb
+ 98: #   DATABASE_URL definido -> postgres
+ 99: #   nenhum dos dois       -> duckdb (padrão local/offline)
+100: DATABASE_URL = os.environ.get("DATABASE_URL", "")
+101: DUCKDB_PATH = os.environ.get("DUCKDB_PATH", "data/leads.duckdb")
+102: 
+103: DB_ENGINE = os.environ.get("DB_ENGINE", "").strip().lower()
+104: if DB_ENGINE not in ("postgres", "duckdb"):
+105:     if os.environ.get("DUCKDB_PATH"):
+106:         DB_ENGINE = "duckdb"
+107:     elif os.environ.get("DATABASE_URL"):
+108:         DB_ENGINE = "postgres"
+109:     else:
+110:         DB_ENGINE = "duckdb"
+111: 
+112: # Configuração do PostgreSQL (usada apenas quando DB_ENGINE=postgres).
+113: DB_HOST = os.environ.get("DB_HOST", "localhost")
+114: DB_PORT = env_int("DB_PORT", 5432)
+115: DB_NAME = os.environ.get("DB_NAME", "leads_db")
+116: DB_USER = os.environ.get("DB_USER", "leads_app")
+117: DB_PASSWORD = os.environ.get("DB_PASSWORD", "")
 ````
 
 ## File: src/schema.py
@@ -3375,230 +4087,306 @@ requirements.txt
 124:         return len(df)
 125: 
 126:     def get_leads_para_envio(self, limite=None, numero=None, cidade=None, nicho=None):
-127:         """Retorna leads ativos, celulares e ainda não enviados (evita spam/fixo).
+127:         """Retorna leads ativos, celulares e ainda não enviados.
 128: 
 129:         Filtros opcionais:
 130:         - numero: filtra por telefone (completo ou parte; ignora não-dígitos)
 131:         - cidade: filtra por nome exato da cidade
 132:         - nicho:  filtra por nicho exato
-133:         """
-134:         p = backend.ph()
-135:         query = f"""
-136:             SELECT lead_id, nome, telefone, whatsapp_link, bairro, cidade, estado, nicho, chat_id_waha
-137:             FROM leads
-138:             WHERE status = 'ativo'
-139:               AND tipo_telefone = 'Celular'
-140:               AND (status_whatsapp IS NULL OR status_whatsapp = 'pendente')
-141:         """
-142:         params = []
-143:         if numero:
-144:             numero = re.sub(r"\D", "", str(numero))
-145:             query += f" AND regexp_replace(telefone, '[^0-9]', '', 'g') LIKE {p}"
-146:             params.append(f"%{numero}%")
-147:         if cidade:
-148:             query += f" AND cidade = {p}"
-149:             params.append(cidade)
-150:         if nicho:
-151:             query += f" AND nicho = {p}"
-152:             params.append(nicho)
-153:         query += " ORDER BY cidade, bairro, nome"
-154:         if limite:
-155:             query += f" LIMIT {p}"
-156:             params.append(int(limite))
-157:         return backend.query_df(self.conn, query, params)
+133: 
+134:         ⚠️ DEDUPLICAÇÃO POR TELEFONE (importante para custo e anti-spam)
+135:         ---------------------------------------------------------------
+136:         A base tem o mesmo telefone em VÁRIAS linhas:
+137: 
+138:         - Redes com filiais que compartilham o número (ex.: 4 unidades da
+139:           mesma barbearia em Niterói com o mesmo celular);
+140:         - O mesmo negócio raspado em dezenas de cidades diferentes
+141:           (medido: um número aparecia em 56 cidades).
+142: 
+143:         Sem deduplicar, cada linha vira uma mensagem cobrada — e o dono do
+144:         número recebe a mesma campanha várias vezes, o que gera denúncia de
+145:         spam e derruba a qualidade do número oficial.
+146: 
+147:         Regra aplicada:
+148:           1. UMA linha por telefone (DISTINCT ON);
+149:           2. exclui telefones que JÁ receberam envio com sucesso em QUALQUER
+150:              campanha anterior (independente de cidade/nicho/bairro).
+151: 
+152:         A fonte de verdade do "já enviado" é `whatsapp_envios_log` (status
+153:         'enviado'), não `leads.status_whatsapp` — porque a marcação no lead
+154:         pode falhar ou ser feita em outra linha do mesmo telefone.
+155:         """
+156:         p = backend.ph()
+157:         expr_tel = "regexp_replace(COALESCE(l.telefone, ''), '[^0-9]', '', 'g')"
 158: 
-159:     def salvar_chat_id_waha(self, nome, cidade, chat_id):
-160:         """Cacheia o chatId resolvido (ex.: 143172869029943@lid) para não repetir
-161:         a chamada ao /api/checkNumberStatus em envios futuros."""
-162:         p = backend.ph()
-163:         backend.execute(self.conn, f"""
-164:             UPDATE leads
-165:             SET chat_id_waha = {p}
-166:             WHERE nome = {p} AND cidade = {p}
-167:         """, [chat_id, nome, cidade])
-168:         backend.commit(self.conn)
-169: 
-170:     def marcar_envio(self, nome, cidade, status_whatsapp):
-171:         """Registra o resultado do envio. 'data_envio_whatsapp' é gravado apenas no sucesso."""
-172:         p = backend.ph()
-173:         if status_whatsapp == 'enviado':
-174:             backend.execute(self.conn, f"""
-175:                 UPDATE leads
-176:                 SET status_whatsapp = {p}, data_envio_whatsapp = {p}
-177:                 WHERE nome = {p} AND cidade = {p}
-178:             """, [status_whatsapp, datetime.now(), nome, cidade])
-179:         else:
-180:             backend.execute(self.conn, f"""
-181:                 UPDATE leads
-182:                 SET status_whatsapp = {p}
-183:                 WHERE nome = {p} AND cidade = {p}
-184:             """, [status_whatsapp, nome, cidade])
-185:         backend.commit(self.conn)
-186: 
-187:     def export_to_excel(self, nicho: str, cidade: str):
-188:         p = backend.ph()
-189:         df = backend.query_df(self.conn, f"""
-190:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, data_extracao
-191:             FROM leads
-192:             WHERE nicho = {p} AND cidade = {p} AND status = 'ativo'
-193:             ORDER BY bairro, nome
-194:         """, [nicho, cidade])
-195: 
-196:         if df.empty:
-197:             print("Nenhum dado ativo para exportar.")
-198:             return
-199: 
-200:         os.makedirs("output", exist_ok=True)
-201:         nome_arquivo = f"output/leads_{nicho}_{cidade}.xlsx".replace(" ", "_").lower()
-202:         df.to_excel(nome_arquivo, index=False)
-203:         print(f"🎉 Exportação concluída: {nome_arquivo} ({len(df)} leads ativos)")
-204: 
-205:     # ------------------------------------------------------------------
-206:     # Progresso da coleta (permite retomar de onde parou)
-207:     # ------------------------------------------------------------------
-208:     def _garantir_tabela_progresso(self):
-209:         """Cria `coleta_progresso` na primeira utilização (idempotente)."""
-210:         if self._progresso_pronto:
-211:             return
-212: 
-213:         tipo = "VARCHAR" if backend.IS_DUCKDB else "TEXT"
-214:         backend.execute(self.conn, f"""
-215:             CREATE TABLE IF NOT EXISTS coleta_progresso (
-216:                 nicho {tipo} NOT NULL,
-217:                 uf {tipo} NOT NULL,
-218:                 cidade {tipo} NOT NULL,
-219:                 status {tipo} NOT NULL DEFAULT 'pendente',
-220:                 termos_total INTEGER,
-221:                 leads_total INTEGER,
-222:                 tentativas INTEGER DEFAULT 0,
-223:                 erro {tipo},
-224:                 iniciado_em TIMESTAMP,
-225:                 atualizado_em TIMESTAMP,
-226:                 concluido_em TIMESTAMP,
-227:                 PRIMARY KEY (nicho, uf, cidade)
-228:             )
-229:         """)
-230:         backend.commit(self.conn)
-231:         self._progresso_pronto = True
+159:         # Subconsulta: telefones já enviados com sucesso (1 linha por número).
+160:         sub_ja_enviados = f"""
+161:             SELECT DISTINCT regexp_replace(COALESCE(telefone, ''), '[^0-9]', '', 'g') AS tel
+162:             FROM whatsapp_envios_log
+163:             WHERE status = 'enviado'
+164:         """
+165: 
+166:         query = f"""
+167:             SELECT DISTINCT ON ({expr_tel})
+168:                    l.lead_id, l.nome, l.telefone, l.whatsapp_link,
+169:                    l.bairro, l.cidade, l.estado, l.nicho, l.chat_id_waha
+170:             FROM leads l
+171:             WHERE l.status = 'ativo'
+172:               AND l.tipo_telefone = 'Celular'
+173:               AND (l.status_whatsapp IS NULL OR l.status_whatsapp = 'pendente')
+174:               AND {expr_tel} <> ''
+175:               AND {expr_tel} NOT IN ({sub_ja_enviados})
+176:         """
+177:         params = []
+178:         if numero:
+179:             numero = re.sub(r"\D", "", str(numero))
+180:             query += f" AND {expr_tel} LIKE {p}"
+181:             params.append(f"%{numero}%")
+182:         if cidade:
+183:             query += f" AND l.cidade = {p}"
+184:             params.append(cidade)
+185:         if nicho:
+186:             query += f" AND l.nicho = {p}"
+187:             params.append(nicho)
+188: 
+189:         # DISTINCT ON exige que a ordem comece pela expressão do DISTINCT.
+190:         # Dentro de cada telefone, escolhe a linha mais estável (lead_id).
+191:         query += f" ORDER BY {expr_tel}, l.lead_id"
+192: 
+193:         # O LIMIT precisa ser aplicado DEPOIS da deduplicação — por isso
+194:         # envolvemos em um SELECT externo.
+195:         if limite:
+196:             query = f"SELECT * FROM ({query}) AS dedup LIMIT {p}"
+197:             params.append(int(limite))
+198: 
+199:         return backend.query_df(self.conn, query, params)
+200: 
+201:     def salvar_chat_id_waha(self, nome, cidade, chat_id):
+202:         """Cacheia o chatId resolvido (ex.: 143172869029943@lid) para não repetir
+203:         a chamada ao /api/checkNumberStatus em envios futuros."""
+204:         p = backend.ph()
+205:         backend.execute(self.conn, f"""
+206:             UPDATE leads
+207:             SET chat_id_waha = {p}
+208:             WHERE nome = {p} AND cidade = {p}
+209:         """, [chat_id, nome, cidade])
+210:         backend.commit(self.conn)
+211: 
+212:     def marcar_envio(self, nome, cidade, status_whatsapp, lead_id=None, telefone=None):
+213:         """Registra o resultado do envio.
+214: 
+215:         'data_envio_whatsapp' é gravado apenas no sucesso.
+216: 
+217:         ⚠️ IDENTIFICAÇÃO DA LINHA (ordem de preferência)
+218:         ------------------------------------------------
+219:         1. `lead_id`    → chave primária, sempre correta
+220:         2. `telefone`   → marca TODAS as linhas com aquele número, o que é
+221:                           exatamente o desejado quando o mesmo celular aparece
+222:                           em várias linhas (redes com filiais, mesmo negócio
+223:                           raspado em cidades diferentes). Assim o número não
+224:                           volta na próxima campanha por outra linha.
+225:         3. nome+cidade  → legado; usado só quando nada mais é informado.
+226: 
+227:         O `WHERE nome = ? AND cidade = ?` sozinho era frágil: não cobria o
+228:         mesmo telefone em outra cidade, então a campanha seguinte reenviava
+229:         para um número que já havia recebido a mensagem.
+230:         """
+231:         p = backend.ph()
 232: 
-233:     def progresso_carregar(self, nicho):
-234:         """Retorna {(uf, cidade): {status, tentativas, leads_total, concluido_em}}."""
-235:         self._garantir_tabela_progresso()
-236:         p = backend.ph()
-237:         linhas = backend.query_all(self.conn, f"""
-238:             SELECT uf, cidade, status, tentativas, leads_total, concluido_em
-239:             FROM coleta_progresso
-240:             WHERE nicho = {p}
-241:         """, [nicho])
-242:         return {
-243:             (uf, cidade): {
-244:                 "status": status,
-245:                 "tentativas": tentativas or 0,
-246:                 "leads_total": leads_total or 0,
-247:                 "concluido_em": concluido_em,
-248:             }
-249:             for uf, cidade, status, tentativas, leads_total, concluido_em in linhas
-250:         }
-251: 
-252:     def progresso_iniciar(self, nicho, uf, cidade, termos_total):
-253:         """Marca a cidade como em andamento (incrementa o contador de tentativas)."""
-254:         self._garantir_tabela_progresso()
-255:         p = backend.ph()
-256:         linha = backend.query_one(self.conn, f"""
-257:             SELECT tentativas FROM coleta_progresso
-258:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
-259:         """, [nicho, uf, cidade])
-260:         tentativas = (int(linha[0] or 0) if linha else 0) + 1
-261:         agora = datetime.now()
-262:         backend.execute(self.conn, f"""
-263:             INSERT INTO coleta_progresso
-264:                 (nicho, uf, cidade, status, termos_total, tentativas,
-265:                  erro, iniciado_em, atualizado_em, concluido_em)
-266:             VALUES ({p}, {p}, {p}, {p}, {p}, {p}, NULL, {p}, {p}, NULL)
-267:             ON CONFLICT (nicho, uf, cidade) DO UPDATE SET
-268:                 status = excluded.status,
-269:                 termos_total = excluded.termos_total,
-270:                 tentativas = excluded.tentativas,
-271:                 erro = NULL,
-272:                 iniciado_em = excluded.iniciado_em,
-273:                 atualizado_em = excluded.atualizado_em,
-274:                 concluido_em = NULL
-275:         """, [nicho, uf, cidade, "em_andamento", int(termos_total), tentativas, agora, agora])
-276:         backend.commit(self.conn)
-277: 
-278:     def progresso_concluir(self, nicho, uf, cidade, leads_total=0):
-279:         """Marca a cidade como concluída."""
-280:         self._garantir_tabela_progresso()
-281:         p = backend.ph()
-282:         agora = datetime.now()
-283:         backend.execute(self.conn, f"""
-284:             UPDATE coleta_progresso
-285:             SET status = {p}, leads_total = {p}, erro = NULL,
-286:                 atualizado_em = {p}, concluido_em = {p}
-287:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
-288:         """, ["concluida", int(leads_total or 0), agora, agora, nicho, uf, cidade])
-289:         backend.commit(self.conn)
-290: 
-291:     def progresso_erro(self, nicho, uf, cidade, erro):
-292:         """Registra a falha da cidade (será tentada novamente no próximo ciclo)."""
-293:         self._garantir_tabela_progresso()
-294:         p = backend.ph()
-295:         backend.execute(self.conn, f"""
-296:             UPDATE coleta_progresso
-297:             SET status = {p}, erro = {p}, atualizado_em = {p}
-298:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
-299:         """, ["erro", str(erro)[:500], datetime.now(), nicho, uf, cidade])
-300:         backend.commit(self.conn)
-301: 
-302:     def progresso_parcial(self, nicho, uf, cidade, leads_total, motivo):
-303:         """Cidade coletada em parte (bloqueio/timeout em alguma área).
-304: 
-305:         Fica fora do filtro de "concluída" para ser tentada de novo no próximo
-306:         ciclo, sem perder os leads já gravados.
-307:         """
-308:         self._garantir_tabela_progresso()
-309:         p = backend.ph()
-310:         backend.execute(self.conn, f"""
-311:             UPDATE coleta_progresso
-312:             SET status = {p}, leads_total = {p}, erro = {p}, atualizado_em = {p}
-313:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
-314:         """, ["parcial", int(leads_total or 0), str(motivo)[:500], datetime.now(),
-315:               nicho, uf, cidade])
-316:         backend.commit(self.conn)
-317: 
-318:     def semear_progresso_de_leads(self, nicho):
-319:         """Marca como concluídas as cidades que já possuem leads no banco.
-320: 
-321:         Serve para retomar a partir de uma coleta que rodou antes de existir o
-322:         progresso. É idempotente e nunca sobrescreve um registro já existente.
-323:         Retorna quantas cidades foram marcadas.
-324:         """
-325:         self._garantir_tabela_progresso()
-326:         p = backend.ph()
-327:         linhas = backend.query_all(self.conn, f"""
-328:             SELECT estado, cidade, COUNT(*) AS total, MAX(data_extracao) AS ultima
-329:             FROM leads
-330:             WHERE nicho = {p} AND estado IS NOT NULL AND cidade IS NOT NULL
-331:             GROUP BY estado, cidade
-332:         """, [nicho])
-333: 
-334:         agora = datetime.now()
-335:         for uf, cidade, total, ultima in linhas:
-336:             backend.execute(self.conn, f"""
-337:                 INSERT INTO coleta_progresso
-338:                     (nicho, uf, cidade, status, leads_total, tentativas,
-339:                      iniciado_em, atualizado_em, concluido_em)
-340:                 VALUES ({p}, {p}, {p}, {p}, {p}, 1, {p}, {p}, {p})
-341:                 ON CONFLICT (nicho, uf, cidade) DO NOTHING
-342:             """, [
-343:                 nicho, uf, cidade, "concluida", int(total or 0),
-344:                 ultima or agora, ultima or agora, ultima or agora,
-345:             ])
-346:         backend.commit(self.conn)
-347:         return len(linhas)
-348: 
-349:     def close(self):
-350:         backend.close(self.conn)
+233:         if lead_id is not None:
+234:             where = f"lead_id = {p}"
+235:             params_where = [lead_id]
+236:         elif telefone:
+237:             digitos = re.sub(r"\D", "", str(telefone))
+238:             if not digitos:
+239:                 print("Aviso: marcar_envio sem telefone válido — usando nome+cidade.")
+240:                 where = f"nome = {p} AND cidade = {p}"
+241:                 params_where = [nome, cidade]
+242:             else:
+243:                 where = (f"regexp_replace(COALESCE(telefone, ''), '[^0-9]', '', 'g') = {p}")
+244:                 params_where = [digitos]
+245:         else:
+246:             where = f"nome = {p} AND cidade = {p}"
+247:             params_where = [nome, cidade]
+248: 
+249:         if status_whatsapp == 'enviado':
+250:             backend.execute(self.conn, f"""
+251:                 UPDATE leads
+252:                 SET status_whatsapp = {p}, data_envio_whatsapp = {p}
+253:                 WHERE {where}
+254:             """, [status_whatsapp, datetime.now()] + params_where)
+255:         else:
+256:             backend.execute(self.conn, f"""
+257:                 UPDATE leads
+258:                 SET status_whatsapp = {p}
+259:                 WHERE {where}
+260:             """, [status_whatsapp] + params_where)
+261:         backend.commit(self.conn)
+262: 
+263:     def export_to_excel(self, nicho: str, cidade: str):
+264:         p = backend.ph()
+265:         df = backend.query_df(self.conn, f"""
+266:             SELECT nome, telefone, tipo_telefone, whatsapp_link, instagram, site, bairro, data_extracao
+267:             FROM leads
+268:             WHERE nicho = {p} AND cidade = {p} AND status = 'ativo'
+269:             ORDER BY bairro, nome
+270:         """, [nicho, cidade])
+271: 
+272:         if df.empty:
+273:             print("Nenhum dado ativo para exportar.")
+274:             return
+275: 
+276:         os.makedirs("output", exist_ok=True)
+277:         nome_arquivo = f"output/leads_{nicho}_{cidade}.xlsx".replace(" ", "_").lower()
+278:         df.to_excel(nome_arquivo, index=False)
+279:         print(f"🎉 Exportação concluída: {nome_arquivo} ({len(df)} leads ativos)")
+280: 
+281:     # ------------------------------------------------------------------
+282:     # Progresso da coleta (permite retomar de onde parou)
+283:     # ------------------------------------------------------------------
+284:     def _garantir_tabela_progresso(self):
+285:         """Cria `coleta_progresso` na primeira utilização (idempotente)."""
+286:         if self._progresso_pronto:
+287:             return
+288: 
+289:         tipo = "VARCHAR" if backend.IS_DUCKDB else "TEXT"
+290:         backend.execute(self.conn, f"""
+291:             CREATE TABLE IF NOT EXISTS coleta_progresso (
+292:                 nicho {tipo} NOT NULL,
+293:                 uf {tipo} NOT NULL,
+294:                 cidade {tipo} NOT NULL,
+295:                 status {tipo} NOT NULL DEFAULT 'pendente',
+296:                 termos_total INTEGER,
+297:                 leads_total INTEGER,
+298:                 tentativas INTEGER DEFAULT 0,
+299:                 erro {tipo},
+300:                 iniciado_em TIMESTAMP,
+301:                 atualizado_em TIMESTAMP,
+302:                 concluido_em TIMESTAMP,
+303:                 PRIMARY KEY (nicho, uf, cidade)
+304:             )
+305:         """)
+306:         backend.commit(self.conn)
+307:         self._progresso_pronto = True
+308: 
+309:     def progresso_carregar(self, nicho):
+310:         """Retorna {(uf, cidade): {status, tentativas, leads_total, concluido_em}}."""
+311:         self._garantir_tabela_progresso()
+312:         p = backend.ph()
+313:         linhas = backend.query_all(self.conn, f"""
+314:             SELECT uf, cidade, status, tentativas, leads_total, concluido_em
+315:             FROM coleta_progresso
+316:             WHERE nicho = {p}
+317:         """, [nicho])
+318:         return {
+319:             (uf, cidade): {
+320:                 "status": status,
+321:                 "tentativas": tentativas or 0,
+322:                 "leads_total": leads_total or 0,
+323:                 "concluido_em": concluido_em,
+324:             }
+325:             for uf, cidade, status, tentativas, leads_total, concluido_em in linhas
+326:         }
+327: 
+328:     def progresso_iniciar(self, nicho, uf, cidade, termos_total):
+329:         """Marca a cidade como em andamento (incrementa o contador de tentativas)."""
+330:         self._garantir_tabela_progresso()
+331:         p = backend.ph()
+332:         linha = backend.query_one(self.conn, f"""
+333:             SELECT tentativas FROM coleta_progresso
+334:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+335:         """, [nicho, uf, cidade])
+336:         tentativas = (int(linha[0] or 0) if linha else 0) + 1
+337:         agora = datetime.now()
+338:         backend.execute(self.conn, f"""
+339:             INSERT INTO coleta_progresso
+340:                 (nicho, uf, cidade, status, termos_total, tentativas,
+341:                  erro, iniciado_em, atualizado_em, concluido_em)
+342:             VALUES ({p}, {p}, {p}, {p}, {p}, {p}, NULL, {p}, {p}, NULL)
+343:             ON CONFLICT (nicho, uf, cidade) DO UPDATE SET
+344:                 status = excluded.status,
+345:                 termos_total = excluded.termos_total,
+346:                 tentativas = excluded.tentativas,
+347:                 erro = NULL,
+348:                 iniciado_em = excluded.iniciado_em,
+349:                 atualizado_em = excluded.atualizado_em,
+350:                 concluido_em = NULL
+351:         """, [nicho, uf, cidade, "em_andamento", int(termos_total), tentativas, agora, agora])
+352:         backend.commit(self.conn)
+353: 
+354:     def progresso_concluir(self, nicho, uf, cidade, leads_total=0):
+355:         """Marca a cidade como concluída."""
+356:         self._garantir_tabela_progresso()
+357:         p = backend.ph()
+358:         agora = datetime.now()
+359:         backend.execute(self.conn, f"""
+360:             UPDATE coleta_progresso
+361:             SET status = {p}, leads_total = {p}, erro = NULL,
+362:                 atualizado_em = {p}, concluido_em = {p}
+363:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+364:         """, ["concluida", int(leads_total or 0), agora, agora, nicho, uf, cidade])
+365:         backend.commit(self.conn)
+366: 
+367:     def progresso_erro(self, nicho, uf, cidade, erro):
+368:         """Registra a falha da cidade (será tentada novamente no próximo ciclo)."""
+369:         self._garantir_tabela_progresso()
+370:         p = backend.ph()
+371:         backend.execute(self.conn, f"""
+372:             UPDATE coleta_progresso
+373:             SET status = {p}, erro = {p}, atualizado_em = {p}
+374:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+375:         """, ["erro", str(erro)[:500], datetime.now(), nicho, uf, cidade])
+376:         backend.commit(self.conn)
+377: 
+378:     def progresso_parcial(self, nicho, uf, cidade, leads_total, motivo):
+379:         """Cidade coletada em parte (bloqueio/timeout em alguma área).
+380: 
+381:         Fica fora do filtro de "concluída" para ser tentada de novo no próximo
+382:         ciclo, sem perder os leads já gravados.
+383:         """
+384:         self._garantir_tabela_progresso()
+385:         p = backend.ph()
+386:         backend.execute(self.conn, f"""
+387:             UPDATE coleta_progresso
+388:             SET status = {p}, leads_total = {p}, erro = {p}, atualizado_em = {p}
+389:             WHERE nicho = {p} AND uf = {p} AND cidade = {p}
+390:         """, ["parcial", int(leads_total or 0), str(motivo)[:500], datetime.now(),
+391:               nicho, uf, cidade])
+392:         backend.commit(self.conn)
+393: 
+394:     def semear_progresso_de_leads(self, nicho):
+395:         """Marca como concluídas as cidades que já possuem leads no banco.
+396: 
+397:         Serve para retomar a partir de uma coleta que rodou antes de existir o
+398:         progresso. É idempotente e nunca sobrescreve um registro já existente.
+399:         Retorna quantas cidades foram marcadas.
+400:         """
+401:         self._garantir_tabela_progresso()
+402:         p = backend.ph()
+403:         linhas = backend.query_all(self.conn, f"""
+404:             SELECT estado, cidade, COUNT(*) AS total, MAX(data_extracao) AS ultima
+405:             FROM leads
+406:             WHERE nicho = {p} AND estado IS NOT NULL AND cidade IS NOT NULL
+407:             GROUP BY estado, cidade
+408:         """, [nicho])
+409: 
+410:         agora = datetime.now()
+411:         for uf, cidade, total, ultima in linhas:
+412:             backend.execute(self.conn, f"""
+413:                 INSERT INTO coleta_progresso
+414:                     (nicho, uf, cidade, status, leads_total, tentativas,
+415:                      iniciado_em, atualizado_em, concluido_em)
+416:                 VALUES ({p}, {p}, {p}, {p}, {p}, 1, {p}, {p}, {p})
+417:                 ON CONFLICT (nicho, uf, cidade) DO NOTHING
+418:             """, [
+419:                 nicho, uf, cidade, "concluida", int(total or 0),
+420:                 ultima or agora, ultima or agora, ultima or agora,
+421:             ])
+422:         backend.commit(self.conn)
+423:         return len(linhas)
+424: 
+425:     def close(self):
+426:         backend.close(self.conn)
 ````
 
 ## File: src/whatsapp.py
@@ -3625,487 +4413,654 @@ requirements.txt
  20: import requests
  21: 
  22: from src import backend
- 23: from src.config import carregar_env, env_int, str_para_bool
- 24: 
- 25: carregar_env()
+ 23: from src import meta_whatsapp
+ 24: from src import chatwoot_registro
+ 25: from src.config import carregar_env, env_int, str_para_bool
  26: 
- 27: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
- 28: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
- 29: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
- 30: 
- 31: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
- 32: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
- 33: 
- 34: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
- 35: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
- 36: 
- 37: # ---------------------------------------------------------------------------
- 38: # Cadência de envio (anti-bloqueio)
- 39: # ---------------------------------------------------------------------------
- 40: # Formato "X a cada Y segundos", ex.: WAHA_CADENCIA=3:60  -> 3 envios por minuto.
- 41: # Os envios são distribuídos ALEATORIAMENTE dentro da janela de Y segundos,
- 42: # evitando pausas fixas (15s, 15s, ...) que são mais fáceis de detectar.
- 43: WAHA_CADENCIA = os.environ.get("WAHA_CADENCIA", "").strip()
- 44: 
- 45: # Legado: WAHA_INTERVALO (pausa fixa) continua funcionando quando WAHA_CADENCIA
- 46: # não é informado.
- 47: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
+ 27: carregar_env()
+ 28: 
+ 29: WAHA_API_URL = os.environ.get("WAHA_API_URL", "http://localhost:3000")
+ 30: WAHA_API_KEY = os.environ.get("WAHA_API_KEY", "")
+ 31: WAHA_SESSION = os.environ.get("WAHA_SESSION", "default")
+ 32: 
+ 33: # ---------------------------------------------------------------------------
+ 34: # PROVEDOR DE ENVIO
+ 35: # ---------------------------------------------------------------------------
+ 36: #   meta  -> API OFICIAL da Meta (Cloud API) — PADRÃO
+ 37: #   waha  -> WAHA (WhatsApp Web não oficial) — BACKUP manual
+ 38: #
+ 39: # IMPORTANTE: é BACKUP, não fallback. O provedor escolhido aqui é o único que
+ 40: # roda. Se a Meta falhar, o lead é marcado como 'falhou' — NÃO tentamos a WAHA
+ 41: # automaticamente, porque isso mascararia problemas (ex.: template rejeitado)
+ 42: # e misturaria dois canais no mesmo log.
+ 43: # Para usar a WAHA, troque a variável e rode de novo.
+ 44: WHATSAPP_PROVIDER = os.environ.get("WHATSAPP_PROVIDER", "meta").strip().lower()
+ 45: if WHATSAPP_PROVIDER not in ("meta", "waha"):
+ 46:     print(f"Aviso: WHATSAPP_PROVIDER inválido ({WHATSAPP_PROVIDER!r}). Usando 'meta'.")
+ 47:     WHATSAPP_PROVIDER = "meta"
  48: 
- 49: # Limite de leads por campanha (uma execução do envio). Vazio = sem limite.
- 50: # ATENÇÃO: é por campanha, NÃO por dia. Para teto diário use WAHA_LIMITE_DIA.
- 51: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
- 52: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
- 53: 
- 54: # ---------------------------------------------------------------------------
- 55: # Janela de envio (horário permitido) e limite diário
- 56: # ---------------------------------------------------------------------------
- 57: # Teto de mensagens enviadas por dia, somando TODAS as campanhas. O contador é
- 58: # lido do log (`whatsapp_envios_log`, status='enviado'), então reiniciar o
- 59: # processo não "zera" o limite. Vazio/0 = sem teto diário.
- 60: WAHA_LIMITE_DIA = env_int("WAHA_LIMITE_DIA", 0) or None
- 61: 
- 62: # Horário permitido para envio: "08:00-19:00" (ou "8-19").
- 63: # Vazio = envia a qualquer hora. Aceita janela que atravessa a meia-noite
- 64: # (ex.: "22:00-06:00"). O dia do teto diário começa junto com a janela.
- 65: WAHA_JANELA_ENVIO = os.environ.get("WAHA_JANELA_ENVIO", "").strip()
+ 49: # Se false, o módulo NÃO tenta enviar (desliga o envio de WhatsApp).
+ 50: WAHA_ATIVO = str_para_bool(os.environ.get("WAHA_ATIVO"), padrao=True)
+ 51: 
+ 52: # Se true, pula a coleta e vai direto para o envio (não coleta nada).
+ 53: SOMENTE_ENVIO = str_para_bool(os.environ.get("SOMENTE_ENVIO"), padrao=False)
+ 54: 
+ 55: # ---------------------------------------------------------------------------
+ 56: # Cadência de envio (anti-bloqueio)
+ 57: # ---------------------------------------------------------------------------
+ 58: # Formato "X a cada Y segundos", ex.: WAHA_CADENCIA=3:60  -> 3 envios por minuto.
+ 59: # Os envios são distribuídos ALEATORIAMENTE dentro da janela de Y segundos,
+ 60: # evitando pausas fixas (15s, 15s, ...) que são mais fáceis de detectar.
+ 61: WAHA_CADENCIA = os.environ.get("WAHA_CADENCIA", "").strip()
+ 62: 
+ 63: # Legado: WAHA_INTERVALO (pausa fixa) continua funcionando quando WAHA_CADENCIA
+ 64: # não é informado.
+ 65: WAHA_INTERVALO = int(os.environ.get("WAHA_INTERVALO", "13"))
  66: 
- 67: _PADRAO_JANELA = re.compile(
- 68:     r"^\s*(\d{1,2})(?::(\d{2}))?\s*(?:-|–|a|as|às)\s*(\d{1,2})(?::(\d{2}))?\s*$",
- 69:     re.IGNORECASE,
- 70: )
+ 67: # Limite de leads por campanha (uma execução do envio). Vazio = sem limite.
+ 68: # ATENÇÃO: é por campanha, NÃO por dia. Para teto diário use WAHA_LIMITE_DIA.
+ 69: WAHA_LIMITE = os.environ.get("WAHA_LIMITE", "").strip()
+ 70: WAHA_LIMITE = int(WAHA_LIMITE) if WAHA_LIMITE else None
  71: 
- 72: 
- 73: def _parse_janela(valor):
- 74:     """Interpreta "08:00-19:00" -> (minuto_inicio, minuto_fim).
- 75: 
- 76:     Retorna None para vazio/inválido ou quando começa e termina no mesmo
- 77:     horário (24h). A janela pode atravessar a meia-noite (início > fim).
- 78:     """
- 79:     if not valor:
- 80:         return None
- 81:     casamento = _PADRAO_JANELA.match(valor)
- 82:     if not casamento:
- 83:         print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
- 84:               f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
- 85:         return None
- 86: 
- 87:     h1, m1, h2, m2 = casamento.groups()
- 88:     horas = (int(h1), int(m1 or 0), int(h2), int(m2 or 0))
- 89:     if horas[0] > 23 or horas[1] > 59 or horas[2] > 23 or horas[3] > 59:
- 90:         print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
- 91:               f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
- 92:         return None
+ 72: # ---------------------------------------------------------------------------
+ 73: # Janela de envio (horário permitido) e limite diário
+ 74: # ---------------------------------------------------------------------------
+ 75: # Teto de mensagens enviadas por dia, somando TODAS as campanhas. O contador é
+ 76: # lido do log (`whatsapp_envios_log`, status='enviado'), então reiniciar o
+ 77: # processo não "zera" o limite. Vazio/0 = sem teto diário.
+ 78: WAHA_LIMITE_DIA = env_int("WAHA_LIMITE_DIA", 0) or None
+ 79: 
+ 80: # Horário permitido para envio: "08:00-19:00" (ou "8-19").
+ 81: # Vazio = envia a qualquer hora. Aceita janela que atravessa a meia-noite
+ 82: # (ex.: "22:00-06:00"). O dia do teto diário começa junto com a janela.
+ 83: WAHA_JANELA_ENVIO = os.environ.get("WAHA_JANELA_ENVIO", "").strip()
+ 84: 
+ 85: _PADRAO_JANELA = re.compile(
+ 86:     r"^\s*(\d{1,2})(?::(\d{2}))?\s*(?:-|–|a|as|às)\s*(\d{1,2})(?::(\d{2}))?\s*$",
+ 87:     re.IGNORECASE,
+ 88: )
+ 89: 
+ 90: 
+ 91: def _parse_janela(valor):
+ 92:     """Interpreta "08:00-19:00" -> (minuto_inicio, minuto_fim).
  93: 
- 94:     inicio = horas[0] * 60 + horas[1]
- 95:     fim = horas[2] * 60 + horas[3]
- 96:     if inicio == fim:
- 97:         return None
- 98:     return inicio, fim
- 99: 
-100: 
-101: _JANELA = _parse_janela(WAHA_JANELA_ENVIO)
-102: 
-103: 
-104: def descrever_janela():
-105:     """Texto da janela configurada (ex.: '08:00-19:00')."""
-106:     if not _JANELA:
-107:         return "24h (sem janela)"
-108:     inicio, fim = _JANELA
-109:     return f"{inicio // 60:02d}:{inicio % 60:02d}-{fim // 60:02d}:{fim % 60:02d}"
-110: 
+ 94:     Retorna None para vazio/inválido ou quando começa e termina no mesmo
+ 95:     horário (24h). A janela pode atravessar a meia-noite (início > fim).
+ 96:     """
+ 97:     if not valor:
+ 98:         return None
+ 99:     casamento = _PADRAO_JANELA.match(valor)
+100:     if not casamento:
+101:         print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
+102:               f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
+103:         return None
+104: 
+105:     h1, m1, h2, m2 = casamento.groups()
+106:     horas = (int(h1), int(m1 or 0), int(h2), int(m2 or 0))
+107:     if horas[0] > 23 or horas[1] > 59 or horas[2] > 23 or horas[3] > 59:
+108:         print(f"Aviso: WAHA_JANELA_ENVIO inválida ({valor!r}). "
+109:               f"Use '08:00-19:00' ou deixe vazio para enviar a qualquer hora.")
+110:         return None
 111: 
-112: def janela_aberta(agora=None):
-113:     """True quando o horário atual está dentro da janela de envio."""
-114:     if not _JANELA:
-115:         return True
-116:     agora = agora or datetime.now()
-117:     atual = agora.hour * 60 + agora.minute
-118:     inicio, fim = _JANELA
-119:     if inicio < fim:
-120:         return inicio <= atual < fim
-121:     return atual >= inicio or atual < fim  # atravessa a meia-noite
-122: 
-123: 
-124: def inicio_da_janela_diaria(agora=None):
-125:     """Início do ciclo atual da janela (base da contagem do teto diário).
-126: 
-127:     Sem janela configurada, o dia começa à meia-noite. Com janela, começa na
-128:     abertura dela — então o teto diário "renova" quando o horário permitido abre.
-129:     """
-130:     agora = agora or datetime.now()
-131:     inicio_min = _JANELA[0] if _JANELA else 0
-132:     inicio = agora.replace(
-133:         hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
-134:     )
-135:     if agora < inicio:
-136:         inicio -= timedelta(days=1)
-137:     return inicio
-138: 
-139: 
-140: def proxima_abertura(agora=None):
-141:     """Próximo momento em que o envio volta a ser permitido (agora, se aberto)."""
-142:     agora = agora or datetime.now()
-143:     if janela_aberta(agora):
-144:         return agora
-145:     inicio_min = _JANELA[0]
-146:     abertura = agora.replace(
-147:         hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
-148:     )
-149:     if agora >= abertura:
-150:         abertura += timedelta(days=1)
-151:     return abertura
-152: 
-153: 
-154: def aviso_fora_da_janela():
-155:     """Informa que o envio está bloqueado e quando ele volta a ser permitido."""
-156:     abertura = proxima_abertura()
-157:     print(f"Fora da janela de envio ({descrever_janela()}). "
-158:           f"Próximo envio a partir de {abertura:%d/%m às %H:%M}.")
-159: 
-160: 
-161: def envios_hoje(db, desde=None):
-162:     """Quantidade de envios concluídos na janela do dia atual.
-163: 
-164:     Usa o log de envios (uma linha por tentativa) como fonte de verdade, então
-165:     vale para qualquer campanha/processo que use o mesmo banco. Se a tabela de
-166:     log ainda não existir, cai para `leads.data_envio_whatsapp`.
-167:     """
-168:     desde = desde or inicio_da_janela_diaria()
-169:     p = backend.ph()
-170:     try:
-171:         total = backend.query_one(db.conn, f"""
-172:             SELECT COUNT(*) FROM whatsapp_envios_log
-173:             WHERE status = {p} AND data_envio >= {p}
-174:         """, ["enviado", desde])
-175:     except Exception:
-176:         total = backend.query_one(db.conn, f"""
-177:             SELECT COUNT(*) FROM leads
-178:             WHERE data_envio_whatsapp IS NOT NULL AND data_envio_whatsapp >= {p}
-179:         """, [desde])
-180:     return int((total or [0])[0] or 0)
+112:     inicio = horas[0] * 60 + horas[1]
+113:     fim = horas[2] * 60 + horas[3]
+114:     if inicio == fim:
+115:         return None
+116:     return inicio, fim
+117: 
+118: 
+119: _JANELA = _parse_janela(WAHA_JANELA_ENVIO)
+120: 
+121: 
+122: def descrever_janela():
+123:     """Texto da janela configurada (ex.: '08:00-19:00')."""
+124:     if not _JANELA:
+125:         return "24h (sem janela)"
+126:     inicio, fim = _JANELA
+127:     return f"{inicio // 60:02d}:{inicio % 60:02d}-{fim // 60:02d}:{fim % 60:02d}"
+128: 
+129: 
+130: def janela_aberta(agora=None):
+131:     """True quando o horário atual está dentro da janela de envio."""
+132:     if not _JANELA:
+133:         return True
+134:     agora = agora or datetime.now()
+135:     atual = agora.hour * 60 + agora.minute
+136:     inicio, fim = _JANELA
+137:     if inicio < fim:
+138:         return inicio <= atual < fim
+139:     return atual >= inicio or atual < fim  # atravessa a meia-noite
+140: 
+141: 
+142: def inicio_da_janela_diaria(agora=None):
+143:     """Início do ciclo atual da janela (base da contagem do teto diário).
+144: 
+145:     Sem janela configurada, o dia começa à meia-noite. Com janela, começa na
+146:     abertura dela — então o teto diário "renova" quando o horário permitido abre.
+147:     """
+148:     agora = agora or datetime.now()
+149:     inicio_min = _JANELA[0] if _JANELA else 0
+150:     inicio = agora.replace(
+151:         hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
+152:     )
+153:     if agora < inicio:
+154:         inicio -= timedelta(days=1)
+155:     return inicio
+156: 
+157: 
+158: def proxima_abertura(agora=None):
+159:     """Próximo momento em que o envio volta a ser permitido (agora, se aberto)."""
+160:     agora = agora or datetime.now()
+161:     if janela_aberta(agora):
+162:         return agora
+163:     inicio_min = _JANELA[0]
+164:     abertura = agora.replace(
+165:         hour=inicio_min // 60, minute=inicio_min % 60, second=0, microsecond=0
+166:     )
+167:     if agora >= abertura:
+168:         abertura += timedelta(days=1)
+169:     return abertura
+170: 
+171: 
+172: def aviso_fora_da_janela():
+173:     """Informa que o envio está bloqueado e quando ele volta a ser permitido."""
+174:     abertura = proxima_abertura()
+175:     print(f"Fora da janela de envio ({descrever_janela()}). "
+176:           f"Próximo envio a partir de {abertura:%d/%m às %H:%M}.")
+177: 
+178: 
+179: def envios_hoje(db, desde=None):
+180:     """Quantidade de envios concluídos na janela do dia atual.
 181: 
-182: 
-183: def resumo_limite_dia(db):
-184:     """(enviados_hoje, restante). `restante` é None quando não há teto diário."""
-185:     if not WAHA_LIMITE_DIA:
-186:         return 0, None
-187:     enviados = envios_hoje(db)
-188:     return enviados, max(0, WAHA_LIMITE_DIA - enviados)
-189: 
-190: 
-191: def _parse_cadencia(valor):
-192:     """Interpreta "N:Y" -> (envios_por_janela, janela_segundos).
-193: 
-194:     Retorna None quando o valor está vazio/inválido (usa o intervalo fixo).
-195:     """
-196:     if not valor:
-197:         return None
-198:     try:
-199:         envios, janela = valor.split(":", 1)
-200:         envios = int(envios.strip())
-201:         janela = int(janela.strip())
-202:     except (ValueError, AttributeError):
-203:         return None
-204:     if envios <= 0 or janela <= 0:
-205:         return None
-206:     return envios, janela
+182:     Usa o log de envios (uma linha por tentativa) como fonte de verdade, então
+183:     vale para qualquer campanha/processo que use o mesmo banco. Se a tabela de
+184:     log ainda não existir, cai para `leads.data_envio_whatsapp`.
+185:     """
+186:     desde = desde or inicio_da_janela_diaria()
+187:     p = backend.ph()
+188:     try:
+189:         total = backend.query_one(db.conn, f"""
+190:             SELECT COUNT(*) FROM whatsapp_envios_log
+191:             WHERE status = {p} AND data_envio >= {p}
+192:         """, ["enviado", desde])
+193:     except Exception:
+194:         total = backend.query_one(db.conn, f"""
+195:             SELECT COUNT(*) FROM leads
+196:             WHERE data_envio_whatsapp IS NOT NULL AND data_envio_whatsapp >= {p}
+197:         """, [desde])
+198:     return int((total or [0])[0] or 0)
+199: 
+200: 
+201: def resumo_limite_dia(db):
+202:     """(enviados_hoje, restante). `restante` é None quando não há teto diário."""
+203:     if not WAHA_LIMITE_DIA:
+204:         return 0, None
+205:     enviados = envios_hoje(db)
+206:     return enviados, max(0, WAHA_LIMITE_DIA - enviados)
 207: 
 208: 
-209: def _intervalos_aleatorios(quantidade, janela_segundos):
-210:     """Gera as pausas (em segundos) para `quantidade` envios numa janela.
+209: def _parse_cadencia(valor):
+210:     """Interpreta "N:Y" -> (envios_por_janela, janela_segundos).
 211: 
-212:     Distribui os envios em pontos aleatórios crescentes dentro da janela e
-213:     retorna a diferença entre pontos consecutivos — o intervalo entre cada envio
-214:     varia, mas o total da janela é respeitado.
-215:     """
-216:     if quantidade <= 1:
-217:         return [0]
-218:     # Pontos aleatórios crescentes: 1 envio em cada "fatia" da janela, com
-219:     # jitter dentro da fatia, garantindo tempos diferentes entre os envios.
-220:     pontos = sorted(
-221:         random.uniform((i * janela_segundos) / quantidade,
-222:                        ((i + 1) * janela_segundos) / quantidade)
-223:         for i in range(quantidade)
-224:     )
-225:     return [round(pontos[i + 1] - pontos[i], 2) for i in range(quantidade - 1)]
+212:     Retorna None quando o valor está vazio/inválido (usa o intervalo fixo).
+213:     """
+214:     if not valor:
+215:         return None
+216:     try:
+217:         envios, janela = valor.split(":", 1)
+218:         envios = int(envios.strip())
+219:         janela = int(janela.strip())
+220:     except (ValueError, AttributeError):
+221:         return None
+222:     if envios <= 0 or janela <= 0:
+223:         return None
+224:     return envios, janela
+225: 
 226: 
-227: 
-228: def _pausas_cadencia(total, envios_janela, janela_segundos):
-229:     """Gera as pausas da campanha inteira respeitando a cadência.
-230: 
-231:     Agrupa os `total` envios em janelas de `janela_segundos` segundos, com
-232:     `envios_janela` envios por janela (distribuídos aleatoriamente). Retorna uma
-233:     lista com `total - 1` pausas (uma entre cada par consecutivo).
-234:     """
-235:     if total <= 1:
-236:         return [0]
-237: 
-238:     # Timestamp de envio de cada lead: janela + posição aleatória dentro dela.
-239:     tempos = []
-240:     for idx in range(total):
-241:         janela_idx = idx // envios_janela
-242:         pos_na_janela = idx % envios_janela
-243:         inicio = janela_idx * janela_segundos
-244:         # posição aleatória dentro da fatia correspondente a este envio
-245:         p = random.uniform(
-246:             inicio + (pos_na_janela * janela_segundos) / envios_janela,
-247:             inicio + ((pos_na_janela + 1) * janela_segundos) / envios_janela,
-248:         )
-249:         tempos.append(p)
-250: 
-251:     tempos.sort()
-252:     return [round(tempos[i + 1] - tempos[i], 2) for i in range(len(tempos) - 1)]
-253: 
-254: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
-255: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
-256: 
-257: 
-258: def _normalizar_chatid(telefone):
-259:     """Converte o telefone salvo em um chatId clássico do WAHA (55DDDNUMERO@c.us)."""
-260:     numero = re.sub(r"\D", "", str(telefone or ""))
-261:     if not numero:
-262:         return None
-263: 
-264:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
-265:     if numero.startswith("55") and len(numero) > 11:
-266:         numero = numero[2:]
-267: 
-268:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
-269:     if len(numero) != 11:
-270:         return None
+227: def _intervalos_aleatorios(quantidade, janela_segundos):
+228:     """Gera as pausas (em segundos) para `quantidade` envios numa janela.
+229: 
+230:     Distribui os envios em pontos aleatórios crescentes dentro da janela e
+231:     retorna a diferença entre pontos consecutivos — o intervalo entre cada envio
+232:     varia, mas o total da janela é respeitado.
+233:     """
+234:     if quantidade <= 1:
+235:         return [0]
+236:     # Pontos aleatórios crescentes: 1 envio em cada "fatia" da janela, com
+237:     # jitter dentro da fatia, garantindo tempos diferentes entre os envios.
+238:     pontos = sorted(
+239:         random.uniform((i * janela_segundos) / quantidade,
+240:                        ((i + 1) * janela_segundos) / quantidade)
+241:         for i in range(quantidade)
+242:     )
+243:     return [round(pontos[i + 1] - pontos[i], 2) for i in range(quantidade - 1)]
+244: 
+245: 
+246: def _pausas_cadencia(total, envios_janela, janela_segundos):
+247:     """Gera as pausas da campanha inteira respeitando a cadência.
+248: 
+249:     Agrupa os `total` envios em janelas de `janela_segundos` segundos, com
+250:     `envios_janela` envios por janela (distribuídos aleatoriamente). Retorna uma
+251:     lista com `total - 1` pausas (uma entre cada par consecutivo).
+252:     """
+253:     if total <= 1:
+254:         return [0]
+255: 
+256:     # Timestamp de envio de cada lead: janela + posição aleatória dentro dela.
+257:     tempos = []
+258:     for idx in range(total):
+259:         janela_idx = idx // envios_janela
+260:         pos_na_janela = idx % envios_janela
+261:         inicio = janela_idx * janela_segundos
+262:         # posição aleatória dentro da fatia correspondente a este envio
+263:         p = random.uniform(
+264:             inicio + (pos_na_janela * janela_segundos) / envios_janela,
+265:             inicio + ((pos_na_janela + 1) * janela_segundos) / envios_janela,
+266:         )
+267:         tempos.append(p)
+268: 
+269:     tempos.sort()
+270:     return [round(tempos[i + 1] - tempos[i], 2) for i in range(len(tempos) - 1)]
 271: 
-272:     return f"55{numero}@c.us"
-273: 
+272: # Mensagem padrão (placeholder). Use {nome}, {bairro} e {cidade}.
+273: MENSAGEM_PADRAO = "Olá {nome}! Vi que vocês atendem no bairro {bairro}, em {cidade}. Podemos conversar?"
 274: 
-275: def _resolver_chatid_waha(telefone, session=None, api_url=None, api_key=None):
-276:     """Resolve o chatId correto via /api/checkNumberStatus.
-277: 
-278:     Números recentes no WhatsApp usam o formato @lid (hidden user ID) em vez do
-279:     clássico @c.us. Enviar com @c.us para esses números retorna HTTP 500.
-280:     A WAHA responde o chatId certo via checkNumberStatus; usamos ele e, se a
-281:     consulta falhar ou o número não existir, caímos no formato clássico @c.us.
-282:     """
-283:     session = session or WAHA_SESSION
-284:     api_url = api_url or WAHA_API_URL
-285:     api_key = api_key if api_key is not None else WAHA_API_KEY
-286: 
-287:     numero = re.sub(r"\D", "", str(telefone or ""))
-288:     if not numero:
-289:         return None
-290: 
-291:     if numero.startswith("55") and len(numero) > 11:
-292:         numero = numero[2:]
-293:     if len(numero) != 11:
-294:         return None
+275: 
+276: def _normalizar_chatid(telefone):
+277:     """Converte o telefone salvo em um chatId clássico do WAHA (55DDDNUMERO@c.us)."""
+278:     numero = re.sub(r"\D", "", str(telefone or ""))
+279:     if not numero:
+280:         return None
+281: 
+282:     # Se veio com DDI 55 e tem mais de 11 dígitos, remove o prefixo.
+283:     if numero.startswith("55") and len(numero) > 11:
+284:         numero = numero[2:]
+285: 
+286:     # Celular brasileiro tem 11 dígitos (DDD + 9 dígitos).
+287:     if len(numero) != 11:
+288:         return None
+289: 
+290:     return f"55{numero}@c.us"
+291: 
+292: 
+293: def _resolver_chatid_waha(telefone, session=None, api_url=None, api_key=None):
+294:     """Resolve o chatId correto via /api/checkNumberStatus.
 295: 
-296:     telefone_internacional = f"55{numero}"
-297: 
-298:     headers = {"Accept": "application/json"}
-299:     if api_key:
-300:         headers["X-Api-Key"] = api_key
-301: 
-302:     url = f"{api_url.rstrip('/')}/api/checkNumberStatus"
-303:     params = {"session": session, "phone": telefone_internacional}
+296:     Números recentes no WhatsApp usam o formato @lid (hidden user ID) em vez do
+297:     clássico @c.us. Enviar com @c.us para esses números retorna HTTP 500.
+298:     A WAHA responde o chatId certo via checkNumberStatus; usamos ele e, se a
+299:     consulta falhar ou o número não existir, caímos no formato clássico @c.us.
+300:     """
+301:     session = session or WAHA_SESSION
+302:     api_url = api_url or WAHA_API_URL
+303:     api_key = api_key if api_key is not None else WAHA_API_KEY
 304: 
-305:     try:
-306:         response = requests.get(url, params=params, headers=headers, timeout=20)
-307:         response.raise_for_status()
-308:         dados = response.json()
-309:         if dados.get("numberExists") and dados.get("chatId"):
-310:             return dados["chatId"]
-311:     except Exception:
-312:         pass
+305:     numero = re.sub(r"\D", "", str(telefone or ""))
+306:     if not numero:
+307:         return None
+308: 
+309:     if numero.startswith("55") and len(numero) > 11:
+310:         numero = numero[2:]
+311:     if len(numero) != 11:
+312:         return None
 313: 
-314:     # Fallback: formato clássico @c.us (funciona para números mais antigos).
-315:     return f"{telefone_internacional}@c.us"
-316: 
-317: 
-318: def _limpar_markdown_whatsapp(texto):
-319:     """Remove marcação de markdown (negrito e links) antes de enviar ao WhatsApp.
-320: 
-321:     - **texto**  -> texto
-322:     - [rótulo](url) -> url (quando o rótulo já é a própria URL) ou "rótulo (url)"
-323:     """
-324:     texto = re.sub(r"\*\*([^*]+)\*\*", r"\1", texto)
-325: 
-326:     def _sub_link(match):
-327:         rotulo = match.group(1)
-328:         url = match.group(2)
-329:         if rotulo.strip() == url.strip():
-330:             return url
-331:         return f"{rotulo} ({url})"
-332: 
-333:     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _sub_link, texto)
+314:     telefone_internacional = f"55{numero}"
+315: 
+316:     headers = {"Accept": "application/json"}
+317:     if api_key:
+318:         headers["X-Api-Key"] = api_key
+319: 
+320:     url = f"{api_url.rstrip('/')}/api/checkNumberStatus"
+321:     params = {"session": session, "phone": telefone_internacional}
+322: 
+323:     try:
+324:         response = requests.get(url, params=params, headers=headers, timeout=20)
+325:         response.raise_for_status()
+326:         dados = response.json()
+327:         if dados.get("numberExists") and dados.get("chatId"):
+328:             return dados["chatId"]
+329:     except Exception:
+330:         pass
+331: 
+332:     # Fallback: formato clássico @c.us (funciona para números mais antigos).
+333:     return f"{telefone_internacional}@c.us"
 334: 
 335: 
-336: def _renderizar_mensagem(template, lead):
-337:     """Substitui {nome}, {bairro} e {cidade} de forma segura e limpa o markdown."""
-338:     bairro = str(lead.get("bairro") or "sua região")
-339:     cidade = str(lead.get("cidade") or "")
-340:     texto = (
-341:         template
-342:         .replace("{nome}", str(lead.get("nome") or ""))
-343:         .replace("{bairro}", bairro)
-344:         .replace("{cidade}", cidade)
-345:     )
-346:     return _limpar_markdown_whatsapp(texto)
-347: 
-348: 
-349: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
-350:     """Envia uma mensagem de texto via WAHA."""
-351:     session = session or WAHA_SESSION
-352:     api_url = api_url or WAHA_API_URL
-353:     api_key = api_key if api_key is not None else WAHA_API_KEY
-354:     url = f"{api_url.rstrip('/')}/api/sendText"
-355: 
-356:     payload = {
-357:         "session": session,
-358:         "chatId": chat_id,
-359:         "text": texto,
-360:     }
-361: 
-362:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
-363:     if api_key:
-364:         headers["X-Api-Key"] = api_key
+336: def _limpar_markdown_whatsapp(texto):
+337:     """Remove marcação de markdown (negrito e links) antes de enviar ao WhatsApp.
+338: 
+339:     - **texto**  -> texto
+340:     - [rótulo](url) -> url (quando o rótulo já é a própria URL) ou "rótulo (url)"
+341:     """
+342:     texto = re.sub(r"\*\*([^*]+)\*\*", r"\1", texto)
+343: 
+344:     def _sub_link(match):
+345:         rotulo = match.group(1)
+346:         url = match.group(2)
+347:         if rotulo.strip() == url.strip():
+348:             return url
+349:         return f"{rotulo} ({url})"
+350: 
+351:     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", _sub_link, texto)
+352: 
+353: 
+354: def _renderizar_mensagem(template, lead):
+355:     """Substitui {nome}, {bairro} e {cidade} de forma segura e limpa o markdown."""
+356:     bairro = str(lead.get("bairro") or "sua região")
+357:     cidade = str(lead.get("cidade") or "")
+358:     texto = (
+359:         template
+360:         .replace("{nome}", str(lead.get("nome") or ""))
+361:         .replace("{bairro}", bairro)
+362:         .replace("{cidade}", cidade)
+363:     )
+364:     return _limpar_markdown_whatsapp(texto)
 365: 
-366:     response = requests.post(url, json=payload, headers=headers, timeout=30)
-367:     response.raise_for_status()
-368:     return response.json()
-369: 
-370: 
-371: def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None):
-372:     """Envia uma mensagem de texto para um número bruto (com DDD), já normalizado.
+366: 
+367: def enviar_texto_waha(chat_id, texto, session=None, api_url=None, api_key=None):
+368:     """Envia uma mensagem de texto via WAHA."""
+369:     session = session or WAHA_SESSION
+370:     api_url = api_url or WAHA_API_URL
+371:     api_key = api_key if api_key is not None else WAHA_API_KEY
+372:     url = f"{api_url.rstrip('/')}/api/sendText"
 373: 
-374:     Útil para o envio de teste, sem precisar de um lead no banco.
-375:     """
-376:     texto = _limpar_markdown_whatsapp(texto)
-377:     chat_id = _resolver_chatid_waha(numero, session=session, api_url=api_url, api_key=api_key)
-378:     if not chat_id:
-379:         raise ValueError(f"Número inválido para envio: {numero}")
-380:     return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
-381: 
-382: 
-383: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None):
-384:     """Envia mensagens para os leads celulares pendentes.
-385: 
-386:     - db: instância de LeadDatabase
-387:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
-388:     - intervalo: pausa fixa em segundos entre envios (usado se não houver cadência)
-389:     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
-390: 
-391:     Respeita dois tetos independentes:
-392:     - `leads`/`limite`: quantos enviar nesta campanha;
-393:     - `WAHA_LIMITE_DIA`: quantos enviar no dia (soma todas as campanhas).
-394:     E a janela de horário `WAHA_JANELA_ENVIO` (ex.: 08:00-19:00): fora dela nada
-395:     é enviado, e a campanha para se a janela fechar no meio.
-396:     """
-397:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
-398:     if leads is None:
-399:         leads = db.get_leads_para_envio(limite)
+374:     payload = {
+375:         "session": session,
+376:         "chatId": chat_id,
+377:         "text": texto,
+378:     }
+379: 
+380:     headers = {"Accept": "application/json", "Content-Type": "application/json"}
+381:     if api_key:
+382:         headers["X-Api-Key"] = api_key
+383: 
+384:     response = requests.post(url, json=payload, headers=headers, timeout=30)
+385:     response.raise_for_status()
+386:     return response.json()
+387: 
+388: 
+389: def enviar_texto_numero(numero, texto, session=None, api_url=None, api_key=None):
+390:     """Envia uma mensagem de texto para um número bruto (com DDD), já normalizado.
+391: 
+392:     Útil para o envio de teste, sem precisar de um lead no banco.
+393:     """
+394:     texto = _limpar_markdown_whatsapp(texto)
+395:     chat_id = _resolver_chatid_waha(numero, session=session, api_url=api_url, api_key=api_key)
+396:     if not chat_id:
+397:         raise ValueError(f"Número inválido para envio: {numero}")
+398:     return enviar_texto_waha(chat_id, texto, session=session, api_url=api_url, api_key=api_key)
+399: 
 400: 
-401:     if leads.empty:
-402:         print("Nenhum lead celular pendente de envio.")
-403:         return
-404: 
-405:     total = len(leads)
-406: 
-407:     # Fora do horário permitido: não inicia a campanha.
-408:     if not janela_aberta():
-409:         aviso_fora_da_janela()
-410:         return
-411: 
-412:     # Teto diário (soma todas as campanhas do dia, lido do log de envios).
-413:     enviados_hoje = 0
-414:     if WAHA_LIMITE_DIA:
-415:         enviados_hoje = envios_hoje(db)
-416:         restante_dia = WAHA_LIMITE_DIA - enviados_hoje
-417:         if restante_dia <= 0:
-418:             print(f"Limite diário atingido: {enviados_hoje}/{WAHA_LIMITE_DIA} envios hoje.")
-419:             print(f"Os envios voltam na próxima janela ({descrever_janela()}).")
-420:             return
-421:         if total > restante_dia:
-422:             print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} já enviados hoje; "
-423:                   f"reduzindo esta campanha para {restante_dia} envio(s).")
-424:             leads = leads.head(restante_dia)
-425:             total = len(leads)
-426: 
-427:     # Cadência aleatória (ex.: 3 a cada 60s) tem prioridade sobre o intervalo fixo.
-428:     cadencia = _parse_cadencia(WAHA_CADENCIA)
-429:     if cadencia:
-430:         envios_janela, janela = cadencia
-431:         pausas = _pausas_cadencia(total, envios_janela, janela)
-432:         print(f"Enviando para {total} lead(s), cadência {envios_janela} a cada {janela}s "
-433:               f"(intervalos aleatórios)...")
-434:     else:
-435:         pausas = [intervalo] * max(0, total - 1)
-436:         print(f"Enviando para {total} lead(s), com intervalo fixo de {intervalo}s...")
-437: 
-438:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
-439:         # Reconfere janela e teto a cada envio: cobre campanha longa que cruza
-440:         # o fim do horário permitido ou a virada do dia.
-441:         if not janela_aberta():
-442:             print(f"Janela de envio encerrada ({descrever_janela()}). "
-443:                   f"Interrompendo; os {total - i + 1} lead(s) restantes continuam "
-444:                   f"pendentes para o próximo horário.")
-445:             break
-446: 
-447:         if WAHA_LIMITE_DIA:
-448:             enviados_hoje = envios_hoje(db)
-449:             if enviados_hoje >= WAHA_LIMITE_DIA:
-450:                 print(f"Limite diário atingido ({enviados_hoje}/{WAHA_LIMITE_DIA}). "
-451:                       f"Interrompendo; os demais leads continuam pendentes.")
-452:                 break
-453: 
-454:         texto = _renderizar_mensagem(mensagem_template, lead)
-455:         lead_id = lead.get("lead_id")
-456:         telefone = lead.get("telefone")
-457:         nome = lead.get("nome")
-458:         cidade = lead.get("cidade")
-459: 
-460:         chat_id = lead.get("chat_id_waha")
-461:         if not chat_id:
-462:             # Resolve (e cacheia) o chatId uma única vez por lead. Números novos
-463:             # usam @lid; a consulta ao checkNumberStatus é feita só na primeira vez.
+401: # ---------------------------------------------------------------------------
+402: # Roteamento por provedor
+403: # ---------------------------------------------------------------------------
+404: def provedor_atual():
+405:     """Rótulo do provedor em uso ('meta' ou 'waha')."""
+406:     return WHATSAPP_PROVIDER
+407: 
+408: 
+409: def descrever_provedor():
+410:     """Descrição do provedor para exibir no menu."""
+411:     if WHATSAPP_PROVIDER == "meta":
+412:         return meta_whatsapp.descrever()
+413:     return f"WAHA (backup) — {WAHA_API_URL}, sessão '{WAHA_SESSION}'"
+414: 
+415: 
+416: def _pode_registrar_chatwoot():
+417:     """O Chatwoot só recebe registro quando o envio foi pela API oficial.
+418: 
+419:     O inbox do Chatwoot aponta para o número oficial (6260). Registrar um
+420:     envio feito pela WAHA criaria uma conversa cuja resposta sairia pelo
+421:     número errado — e cuja mensagem de retorno do lead nunca chegaria ao
+422:     Chatwoot (o bridge está só na rota Meta).
+423:     """
+424:     if WHATSAPP_PROVIDER == "meta":
+425:         return True
+426:     return str_para_bool(os.environ.get("CHATWOOT_REGISTRAR_WAHA"), padrao=False)
+427: 
+428: 
+429: def enviar_para_lead(lead, texto_renderizado=None):
+430:     """Envia a campanha para UM lead usando o provedor configurado.
+431: 
+432:     - `meta`: envia o TEMPLATE aprovado (META_TEMPLATE_NOME). O texto livre do
+433:       banco NÃO vai para o lead — serve só para o log.
+434:     - `waha`: envia o texto livre normalmente (comportamento original).
+435:       ⚠️ NÃO registra no Chatwoot (ver `_pode_registrar_chatwoot`).
+436: 
+437:     Returns:
+438:         dict com {ok, status_code, wamid, chat_id, response, erro,
+439:                   registrado_chatwoot}
+440: 
+441:     Nunca levanta exceção: devolve ok=False e o motivo em `erro`.
+442:     """
+443:     telefone = lead.get("telefone")
+444:     texto_renderizado = texto_renderizado or ""
+445: 
+446:     if WHATSAPP_PROVIDER == "meta":
+447:         params = meta_whatsapp._params_do_lead(lead)
+448:         resultado = meta_whatsapp.enviar_template(
+449:             telefone, body_params=params
+450:         )
+451:         retorno = {
+452:             "ok": resultado["ok"],
+453:             "status_code": resultado["status_code"],
+454:             "wamid": resultado.get("wamid"),
+455:             "chat_id": None,
+456:             "response": resultado.get("response"),
+457:             "erro": resultado.get("erro"),
+458:             "registrado_chatwoot": False,
+459:         }
+460:     else:
+461:         # WAHA: precisa do chatId (@lid ou @c.us)
+462:         chat_id = lead.get("chat_id_waha")
+463:         if not chat_id:
 464:             chat_id = _resolver_chatid_waha(telefone)
-465:             if chat_id:
-466:                 db.salvar_chat_id_waha(nome, cidade, chat_id)
-467: 
-468:         if not chat_id:
-469:             db.marcar_envio(nome, cidade, "falhou")
-470:             db.salvar_log_envio(
-471:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
-472:                 mensagem=texto, erro="telefone inválido",
-473:             )
-474:             print(f"[{i}/{total}] {nome} - telefone inválido, marcado como falhou.")
-475:             continue
-476: 
-477:         try:
-478:             resposta = enviar_texto_waha(chat_id, texto)
-479:             db.marcar_envio(nome, cidade, "enviado")
-480:             db.salvar_log_envio(
-481:                 lead_id, nome, cidade, telefone, chat_id, "enviado",
-482:                 mensagem=texto, payload=resposta,
-483:             )
-484:             print(f"[{i}/{total}] ENVIADO -> {nome} ({chat_id})")
-485:         except Exception as e:
-486:             payload_erro = None
-487:             if getattr(e, "response", None) is not None:
-488:                 try:
-489:                     payload_erro = e.response.text
-490:                 except Exception:
-491:                     payload_erro = None
-492:             erro = f"{type(e).__name__}: {e}"
-493:             db.marcar_envio(nome, cidade, "falhou")
-494:             db.salvar_log_envio(
-495:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
-496:                 mensagem=texto, payload=payload_erro, erro=erro,
-497:             )
-498:             print(f"[{i}/{total}] FALHOU -> {nome} ({chat_id}): {erro}")
-499: 
-500:         if i < total:
-501:             time.sleep(pausas[i - 1])
-502: 
-503:     print("Campanha finalizada.")
+465:         if not chat_id:
+466:             return {
+467:                 "ok": False, "status_code": None, "wamid": None,
+468:                 "chat_id": None, "response": None,
+469:                 "erro": "telefone inválido (não foi possível resolver o chatId)",
+470:                 "registrado_chatwoot": False,
+471:             }
+472:         try:
+473:             resposta = enviar_texto_waha(chat_id, texto_renderizado)
+474:             retorno = {
+475:                 "ok": True, "status_code": 200, "wamid": None,
+476:                 "chat_id": chat_id, "response": resposta,
+477:                 "erro": None, "registrado_chatwoot": False,
+478:             }
+479:         except Exception as e:
+480:             payload_erro = None
+481:             if getattr(e, "response", None) is not None:
+482:                 try:
+483:                     payload_erro = e.response.text
+484:                 except Exception:
+485:                     payload_erro = None
+486:             return {
+487:                 "ok": False,
+488:                 "status_code": getattr(getattr(e, "response", None), "status_code", None),
+489:                 "wamid": None, "chat_id": chat_id, "response": payload_erro,
+490:                 "erro": f"{type(e).__name__}: {e}",
+491:                 "registrado_chatwoot": False,
+492:             }
+493: 
+494:     # ------------------------------------------------------------------
+495:     # Registro no Chatwoot (nota privada) — só quando o envio deu certo.
+496:     # Falha aqui NÃO invalida o envio: já foi aceito pela Meta/WAHA.
+497:     #
+498:     # ⚠️ SÓ REGISTRA NO PROVEDOR OFICIAL (`meta`).
+499:     #
+500:     # Por que bloquear o WAHA:
+501:     #   1. O inbox do Chatwoot é `whatsapp_cloud` → phone_number_id 1121736814366847
+502:     #      (o número oficial 6260). Se um atendente responder, a resposta sai
+503:     #      pelo 6260 — mas o lead recebeu a campanha de OUTRO número (WAHA).
+504:     #      O lead vê dois números na mesma conversa e desconfia de golpe.
+505:     #   2. O bridge do Chatwoot está apenas na rota do webhook Meta
+506:     #      (`meta_webhook_routes`). Mensagem recebida via WAHA NUNCA chega ao
+507:     #      Chatwoot — a conversa fica "muda" e o atendente acha que o lead
+508:     #      ignorou, quando na verdade respondeu por outro canal.
+509:     #   3. Todo tráfego do Chatwoot sai pelo número oficial; leads que só
+510:     #      conhecem o número da WAHA recebendo mensagem do 6260 pode ser
+511:     #      reportado como spam e derrubar a qualidade do número oficial.
+512:     #
+513:     # Para forçar o registro no WAHA (NÃO recomendado), defina no .env:
+514:     #   CHATWOOT_REGISTRAR_WAHA=true
+515:     # ------------------------------------------------------------------
+516:     if retorno["ok"] and chatwoot_registro.ativo():
+517:         if _pode_registrar_chatwoot():
+518:             try:
+519:                 retorno["registrado_chatwoot"] = chatwoot_registro.registrar_envio(
+520:                     lead,
+521:                     template_nome=(meta_whatsapp.META_TEMPLATE_NOME
+522:                                    if WHATSAPP_PROVIDER == "meta" else "texto-livre"),
+523:                     wamid=retorno.get("wamid"),
+524:                     mensagem_log=texto_renderizado,
+525:                 )
+526:             except Exception as e:
+527:                 print(f"Aviso: falha ao registrar no Chatwoot (ignorado): {e}")
+528:         else:
+529:             print("Aviso: envio via WAHA NÃO é registrado no Chatwoot "
+530:                   "(use WHATSAPP_PROVIDER=meta para ter o registro).")
+531: 
+532:     return retorno
+533: 
+534: 
+535: def enviar_teste_numero(numero, texto_renderizado=None):
+536:     """Envio de teste para um número bruto, respeitando o provedor.
+537: 
+538:     Para o provedor `meta` o número é tratado como um lead fictício (só o
+539:     telefone importa, já que o conteúdo vem do template aprovado).
+540:     """
+541:     lead_ficticio = {"telefone": numero, "nome": "", "cidade": ""}
+542:     return enviar_para_lead(lead_ficticio, texto_renderizado)
+543: 
+544: 
+545: def disparar_campanha(db, mensagem_template=None, intervalo=13, limite=None, leads=None,
+546:                       ignorar_limite_dia=False):
+547:     """Envia mensagens para os leads celulares pendentes.
+548: 
+549:     - db: instância de LeadDatabase
+550:     - mensagem_template: texto com {nome}, {bairro}, {cidade} (usa MENSAGEM_PADRAO se None)
+551:     - intervalo: pausa fixa em segundos entre envios (usado se não houver cadência)
+552:     - leads: DataFrame opcional já filtrado; se None, busca pendentes (com limite)
+553:     - ignorar_limite_dia: quando True, NÃO aplica `WAHA_LIMITE_DIA`.
+554:       Usado apenas quando o operador confirma explicitamente no menu — o teto
+555:       diário é uma proteção contra bloqueio do número, então ignorá-lo precisa
+556:       ser uma decisão consciente, nunca automática.
+557: 
+558:     Respeita dois tetos independentes:
+559:     - `leads`/`limite`: quantos enviar nesta campanha;
+560:     - `WAHA_LIMITE_DIA`: quantos enviar no dia (soma todas as campanhas).
+561:     E a janela de horário `WAHA_JANELA_ENVIO` (ex.: 08:00-19:00): fora dela nada
+562:     é enviado, e a campanha para se a janela fechar no meio.
+563:     """
+564:     mensagem_template = mensagem_template or MENSAGEM_PADRAO
+565:     if leads is None:
+566:         leads = db.get_leads_para_envio(limite)
+567: 
+568:     if leads.empty:
+569:         print("Nenhum lead celular pendente de envio.")
+570:         return
+571: 
+572:     total = len(leads)
+573: 
+574:     # Fora do horário permitido: não inicia a campanha.
+575:     if not janela_aberta():
+576:         aviso_fora_da_janela()
+577:         return
+578: 
+579:     # Teto diário (soma todas as campanhas do dia, lido do log de envios).
+580:     enviados_hoje = 0
+581:     if WAHA_LIMITE_DIA and not ignorar_limite_dia:
+582:         enviados_hoje = envios_hoje(db)
+583:         restante_dia = WAHA_LIMITE_DIA - enviados_hoje
+584:         if restante_dia <= 0:
+585:             print(f"Limite diário atingido: {enviados_hoje}/{WAHA_LIMITE_DIA} envios hoje.")
+586:             print(f"Os envios voltam na próxima janela ({descrever_janela()}).")
+587:             return
+588:         if total > restante_dia:
+589:             print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} já enviados hoje; "
+590:                   f"reduzindo esta campanha para {restante_dia} envio(s).")
+591:             leads = leads.head(restante_dia)
+592:             total = len(leads)
+593:     elif WAHA_LIMITE_DIA and ignorar_limite_dia:
+594:         print(f"ATENÇÃO: teto diário de {WAHA_LIMITE_DIA} IGNORADO por decisão manual. "
+595:               f"Já enviados hoje: {envios_hoje(db)}.")
+596: 
+597:     # Cadência aleatória (ex.: 3 a cada 60s) tem prioridade sobre o intervalo fixo.
+598:     cadencia = _parse_cadencia(WAHA_CADENCIA)
+599:     if cadencia:
+600:         envios_janela, janela = cadencia
+601:         pausas = _pausas_cadencia(total, envios_janela, janela)
+602:         print(f"Enviando para {total} lead(s), cadência {envios_janela} a cada {janela}s "
+603:               f"(intervalos aleatórios)...")
+604:     else:
+605:         pausas = [intervalo] * max(0, total - 1)
+606:         print(f"Enviando para {total} lead(s), com intervalo fixo de {intervalo}s...")
+607: 
+608:     for i, (_, lead) in enumerate(leads.iterrows(), 1):
+609:         # Reconfere janela e teto a cada envio: cobre campanha longa que cruza
+610:         # o fim do horário permitido ou a virada do dia.
+611:         if not janela_aberta():
+612:             print(f"Janela de envio encerrada ({descrever_janela()}). "
+613:                   f"Interrompendo; os {total - i + 1} lead(s) restantes continuam "
+614:                   f"pendentes para o próximo horário.")
+615:             break
+616: 
+617:         if WAHA_LIMITE_DIA and not ignorar_limite_dia:
+618:             enviados_hoje = envios_hoje(db)
+619:             if enviados_hoje >= WAHA_LIMITE_DIA:
+620:                 print(f"Limite diário atingido ({enviados_hoje}/{WAHA_LIMITE_DIA}). "
+621:                       f"Interrompendo; os demais leads continuam pendentes.")
+622:                 break
+623: 
+624:         texto = _renderizar_mensagem(mensagem_template, lead)
+625:         lead_id = lead.get("lead_id")
+626:         telefone = lead.get("telefone")
+627:         nome = lead.get("nome")
+628:         cidade = lead.get("cidade")
+629: 
+630:         # Envia pelo provedor configurado (meta = template oficial | waha = texto).
+631:         resultado = enviar_para_lead(lead, texto)
+632:         chat_id = resultado.get("chat_id")
+633: 
+634:         if resultado["ok"]:
+635:             # Cacheia o chatId só quando o provedor é WAHA (a Meta não usa).
+636:             if chat_id and not lead.get("chat_id_waha"):
+637:                 db.salvar_chat_id_waha(nome, cidade, chat_id)
+638: 
+639:             # Marca por telefone: o mesmo número pode estar em várias linhas
+640:             # (filiais / mesmo negócio em cidades diferentes). Marcar todas
+641:             # evita que ele volte na próxima campanha por outra linha.
+642:             db.marcar_envio(nome, cidade, "enviado",
+643:                             lead_id=lead_id, telefone=telefone)
+644:             db.salvar_log_envio(
+645:                 lead_id, nome, cidade, telefone, chat_id, "enviado",
+646:                 mensagem=texto, payload=resultado.get("response"),
+647:             )
+648:             extra = ""
+649:             if resultado.get("wamid"):
+650:                 extra += f" wamid={resultado['wamid'][:24]}…"
+651:             if resultado.get("registrado_chatwoot"):
+652:                 extra += " [chatwoot ✓]"
+653:             print(f"[{i}/{total}] ENVIADO -> {nome} ({telefone}){extra}")
+654:         else:
+655:             erro = resultado.get("erro") or "erro desconhecido"
+656:             # Em falha NÃO marcamos o telefone inteiro: o número pode ser
+657:             # válido e o problema ter sido temporário (token, rede). Marcar só
+658:             # a linha evita "queimar" o número para futuras campanhas.
+659:             db.marcar_envio(nome, cidade, "falhou",
+660:                             lead_id=lead_id)
+661:             db.salvar_log_envio(
+662:                 lead_id, nome, cidade, telefone, chat_id, "falhou",
+663:                 mensagem=texto, payload=resultado.get("response"), erro=erro,
+664:             )
+665:             print(f"[{i}/{total}] FALHOU -> {nome} ({telefone}): {erro}")
+666: 
+667:         if i < total:
+668:             time.sleep(pausas[i - 1])
+669: 
+670:     print("Campanha finalizada.")
 ````
 
 ## File: .gitignore
@@ -4142,7 +5097,7 @@ requirements.txt
 30: .DS_Store
 31: Thumbs.db
 32: 
-33: # Arquivos compactados
+33: # Arquivos compactados 
 34: *.zip
 ````
 
@@ -4169,351 +5124,408 @@ requirements.txt
  19: from src.database import LeadDatabase
  20: from src.whatsapp import (
  21:     disparar_campanha,
- 22:     enviar_texto_numero,
+ 22:     enviar_teste_numero,
  23:     aviso_fora_da_janela,
  24:     descrever_janela,
- 25:     janela_aberta,
- 26:     resumo_limite_dia,
- 27:     WAHA_INTERVALO,
- 28:     WAHA_LIMITE,
- 29:     WAHA_LIMITE_DIA,
- 30:     WAHA_ATIVO,
- 31:     SOMENTE_ENVIO,
- 32: )
- 33: 
- 34: 
- 35: def coletar_leads():
- 36:     df_estados = obter_estados()
- 37:     if df_estados.empty:
- 38:         return
- 39: 
- 40:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
- 41:     if uf_escolhida not in df_estados['uf'].values:
- 42:         print("UF inválida.")
- 43:         return
- 44: 
- 45:     cidades = obter_cidades(uf_escolhida)
- 46:     termo_cidade = input("Digite o nome da cidade: ").strip()
- 47:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
- 48: 
- 49:     if not cidades_filtradas:
- 50:         print("Cidade não encontrada.")
- 51:         return
- 52:     elif len(cidades_filtradas) > 1:
- 53:         cidade_escolhida = input(
- 54:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
- 55:         ).strip()
- 56:         exatos = filtrar_cidades(cidades, cidade_escolhida)
- 57:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
- 58:     else:
- 59:         cidade_escolhida = cidades_filtradas[0]
- 60: 
- 61:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
- 62:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
- 63:     if municipio:
- 64:         cidade_escolhida = municipio["nome"]
- 65:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
- 66:     else:
- 67:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
- 68: 
- 69:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
+ 25:     descrever_provedor,
+ 26:     janela_aberta,
+ 27:     resumo_limite_dia,
+ 28:     provedor_atual,
+ 29:     WAHA_INTERVALO,
+ 30:     WAHA_LIMITE,
+ 31:     WAHA_LIMITE_DIA,
+ 32:     WAHA_ATIVO,
+ 33:     SOMENTE_ENVIO,
+ 34: )
+ 35: 
+ 36: 
+ 37: def coletar_leads():
+ 38:     df_estados = obter_estados()
+ 39:     if df_estados.empty:
+ 40:         return
+ 41: 
+ 42:     uf_escolhida = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+ 43:     if uf_escolhida not in df_estados['uf'].values:
+ 44:         print("UF inválida.")
+ 45:         return
+ 46: 
+ 47:     cidades = obter_cidades(uf_escolhida)
+ 48:     termo_cidade = input("Digite o nome da cidade: ").strip()
+ 49:     cidades_filtradas = filtrar_cidades(cidades, termo_cidade)
+ 50: 
+ 51:     if not cidades_filtradas:
+ 52:         print("Cidade não encontrada.")
+ 53:         return
+ 54:     elif len(cidades_filtradas) > 1:
+ 55:         cidade_escolhida = input(
+ 56:             f"Várias encontradas ({', '.join(cidades_filtradas[:3])}...). Digite o nome exato: "
+ 57:         ).strip()
+ 58:         exatos = filtrar_cidades(cidades, cidade_escolhida)
+ 59:         cidade_escolhida = exatos[0] if exatos else cidade_escolhida
+ 60:     else:
+ 61:         cidade_escolhida = cidades_filtradas[0]
+ 62: 
+ 63:     # Confirma o município no IBGE e passa a usar o nome oficial (com acentos).
+ 64:     municipio = obter_municipio(cidade_escolhida, uf_escolhida)
+ 65:     if municipio:
+ 66:         cidade_escolhida = municipio["nome"]
+ 67:         print(f"Município (IBGE): {cidade_escolhida}-{uf_escolhida} | código {municipio['id_municipio']}")
+ 68:     else:
+ 69:         print(f"Aviso: {cidade_escolhida}-{uf_escolhida} não foi confirmado no IBGE.")
  70: 
- 71:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
+ 71:     nicho = input(f"\nQual o nicho para {cidade_escolhida}-{uf_escolhida}? ").strip().lower()
  72: 
- 73:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
+ 73:     termos_busca = obter_termos_busca(cidade_escolhida, uf_escolhida)
  74: 
- 75:     print("\nIniciando extração...")
- 76:     db = LeadDatabase()
- 77: 
- 78:     df_resultados = rodar_scraper_multithread(
- 79:         nicho=nicho,
- 80:         cidade=cidade_escolhida,
- 81:         uf=uf_escolhida,
- 82:         termos_lista=termos_busca,
- 83:         mostrar_navegador=mostrar_navegador,
- 84:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
- 85:     )
- 86: 
- 87:     if not df_resultados.empty:
- 88:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
- 89:         db.export_to_excel(nicho, cidade_escolhida)
- 90:     else:
- 91:         print("Nenhum dado extraído.")
- 92: 
- 93:     db.close()
+ 75:     mostrar_navegador = input("\nVer o navegador? (S/N): ").strip().upper() == 'S'
+ 76: 
+ 77:     print("\nIniciando extração...")
+ 78:     db = LeadDatabase()
+ 79: 
+ 80:     df_resultados = rodar_scraper_multithread(
+ 81:         nicho=nicho,
+ 82:         cidade=cidade_escolhida,
+ 83:         uf=uf_escolhida,
+ 84:         termos_lista=termos_busca,
+ 85:         mostrar_navegador=mostrar_navegador,
+ 86:         save_callback=db.save_leads,  # salvamento incremental (UPSERT) a cada área concluída
+ 87:     )
+ 88: 
+ 89:     if not df_resultados.empty:
+ 90:         print("\nLeads salvos incrementalmente no DuckDB (UPSERT).")
+ 91:         db.export_to_excel(nicho, cidade_escolhida)
+ 92:     else:
+ 93:         print("Nenhum dado extraído.")
  94: 
- 95: 
- 96: def _confirmar(texto):
- 97:     """Pergunta S/N e retorna True para respostas afirmativas."""
- 98:     return input(texto).strip().upper() in ("S", "SIM", "Y", "YES")
- 99: 
-100: 
-101: def _escolher_template(templates):
-102:     """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
-103:     print("\nTemplates ativos:")
-104:     for t in templates:
-105:         segmento = t.get("segmento")
-106:         sufixo = f"  [{segmento}]" if segmento else ""
-107:         print(f"  {t['id']} - {t['descricao']}{sufixo}")
-108: 
-109:     escolha = input("Escolha o template (Enter = primeiro): ").strip()
-110:     if not escolha:
-111:         return templates[0]["mensagem"]
-112: 
-113:     for t in templates:
-114:         if str(t["id"]) == escolha:
-115:             return t["mensagem"]
-116: 
-117:     print("Opção inválida. Usando o primeiro template.")
-118:     return templates[0]["mensagem"]
-119: 
-120: 
-121: def _escolher_filtros():
-122:     """Pergunta os filtros de envio; Enter = sem filtro (todos os leads)."""
-123:     print("\n=== FILTROS DE ENVIO ===")
-124:     print("0 - Todos (sem filtro)")
-125:     print("1 - Por número")
-126:     print("2 - Por cidade")
-127:     print("3 - Por nicho")
-128:     opcao = input("Escolha um filtro (Enter = 0): ").strip() or "0"
-129: 
-130:     numero = cidade = nicho = None
-131:     if opcao == "1":
-132:         numero = input("Número (completo ou parte): ").strip() or None
-133:     elif opcao == "2":
-134:         cidade = input("Cidade: ").strip() or None
-135:     elif opcao == "3":
-136:         nicho = input("Nicho: ").strip() or None
-137:     elif opcao != "0":
-138:         print("Opção inválida. Usando 'Todos'.")
-139:     return numero, cidade, nicho
-140: 
-141: 
-142: def testar_envio(db, mensagem, pendentes=None):
-143:     """Envia um teste para um número digitado ou para um lead pendente.
-144: 
-145:     `pendentes` (opcional): DataFrame já filtrado; se None, busca até 10 pendentes.
-146:     """
-147:     print("\n--- TESTE DE ENVIO ---")
-148:     print("1 - Digitar um número de teste")
-149:     print("2 - Escolher um lead pendente")
-150:     opcao = input("Escolha: ").strip()
-151: 
-152:     numero = None
-153:     if opcao == "1":
-154:         numero = input("Digite o número com DDD (ex: 51999998888): ").strip()
-155:     elif opcao == "2":
-156:         if pendentes is None:
-157:             pendentes = db.get_leads_para_envio(limite=10)
-158:         if pendentes.empty:
-159:             print("Nenhum lead pendente para testar.")
-160:             return
-161:         amostra = pendentes.head(10)
-162:         print("Leads pendentes:")
-163:         for i, (_, lead) in enumerate(amostra.iterrows(), 1):
-164:             print(f"  {i} - {lead['nome']} ({lead['telefone']})")
-165:         escolha = input("Escolha o número do lead: ").strip()
-166:         if not escolha.isdigit() or not (1 <= int(escolha) <= len(amostra)):
-167:             print("Escolha inválida.")
-168:             return
-169:         numero = amostra.iloc[int(escolha) - 1]["telefone"]
-170:     else:
-171:         print("Opção inválida.")
-172:         return
-173: 
-174:     if not numero:
-175:         print("Nenhum número informado.")
-176:         return
-177: 
-178:     try:
-179:         enviar_texto_numero(numero, mensagem)
-180:         print(f"✅ Teste enviado para {numero}")
-181:     except Exception as e:
-182:         print(f"❌ Falha no teste para {numero}: {e}")
-183: 
-184: 
-185: def enviar_whatsapp_menu():
-186:     print("\n=== ENVIO WHATSAPP (WAHA) ===")
-187: 
-188:     if not WAHA_ATIVO:
-189:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
-190:         return
-191: 
-192:     db = LeadDatabase()
+ 95:     db.close()
+ 96: 
+ 97: 
+ 98: def _confirmar(texto):
+ 99:     """Pergunta S/N e retorna True para respostas afirmativas."""
+100:     return input(texto).strip().upper() in ("S", "SIM", "Y", "YES")
+101: 
+102: 
+103: def _escolher_template(templates):
+104:     """Lista os templates ativos e retorna a mensagem escolhida pelo usuário."""
+105:     print("\nTemplates ativos:")
+106:     for t in templates:
+107:         segmento = t.get("segmento")
+108:         sufixo = f"  [{segmento}]" if segmento else ""
+109:         print(f"  {t['id']} - {t['descricao']}{sufixo}")
+110: 
+111:     escolha = input("Escolha o template (Enter = primeiro): ").strip()
+112:     if not escolha:
+113:         return templates[0]["mensagem"]
+114: 
+115:     for t in templates:
+116:         if str(t["id"]) == escolha:
+117:             return t["mensagem"]
+118: 
+119:     print("Opção inválida. Usando o primeiro template.")
+120:     return templates[0]["mensagem"]
+121: 
+122: 
+123: def _escolher_filtros():
+124:     """Pergunta os filtros de envio; Enter = sem filtro (todos os leads)."""
+125:     print("\n=== FILTROS DE ENVIO ===")
+126:     print("0 - Todos (sem filtro)")
+127:     print("1 - Por número")
+128:     print("2 - Por cidade")
+129:     print("3 - Por nicho")
+130:     opcao = input("Escolha um filtro (Enter = 0): ").strip() or "0"
+131: 
+132:     numero = cidade = nicho = None
+133:     if opcao == "1":
+134:         numero = input("Número (completo ou parte): ").strip() or None
+135:     elif opcao == "2":
+136:         cidade = input("Cidade: ").strip() or None
+137:     elif opcao == "3":
+138:         nicho = input("Nicho: ").strip() or None
+139:     elif opcao != "0":
+140:         print("Opção inválida. Usando 'Todos'.")
+141:     return numero, cidade, nicho
+142: 
+143: 
+144: def testar_envio(db, mensagem, pendentes=None):
+145:     """Envia um teste para um número digitado ou para um lead pendente.
+146: 
+147:     `pendentes` (opcional): DataFrame já filtrado; se None, busca até 10 pendentes.
+148:     """
+149:     print("\n--- TESTE DE ENVIO ---")
+150:     print("1 - Digitar um número de teste")
+151:     print("2 - Escolher um lead pendente")
+152:     opcao = input("Escolha: ").strip()
+153: 
+154:     numero = None
+155:     if opcao == "1":
+156:         numero = input("Digite o número com DDD (ex: 51999998888): ").strip()
+157:     elif opcao == "2":
+158:         if pendentes is None:
+159:             pendentes = db.get_leads_para_envio(limite=10)
+160:         if pendentes.empty:
+161:             print("Nenhum lead pendente para testar.")
+162:             return
+163:         amostra = pendentes.head(10)
+164:         print("Leads pendentes:")
+165:         for i, (_, lead) in enumerate(amostra.iterrows(), 1):
+166:             print(f"  {i} - {lead['nome']} ({lead['telefone']})")
+167:         escolha = input("Escolha o número do lead: ").strip()
+168:         if not escolha.isdigit() or not (1 <= int(escolha) <= len(amostra)):
+169:             print("Escolha inválida.")
+170:             return
+171:         numero = amostra.iloc[int(escolha) - 1]["telefone"]
+172:     else:
+173:         print("Opção inválida.")
+174:         return
+175: 
+176:     if not numero:
+177:         print("Nenhum número informado.")
+178:         return
+179: 
+180:     try:
+181:         resultado = enviar_teste_numero(numero, mensagem)
+182:         if resultado.get("ok"):
+183:             extra = ""
+184:             if resultado.get("wamid"):
+185:                 extra = f" (wamid={resultado['wamid'][:24]}…)"
+186:             if resultado.get("registrado_chatwoot"):
+187:                 extra += " [chatwoot ✓]"
+188:             print(f"✅ Teste enviado para {numero}{extra}")
+189:         else:
+190:             print(f"❌ Falha no teste para {numero}: {resultado.get('erro')}")
+191:     except Exception as e:
+192:         print(f"❌ Falha no teste para {numero}: {e}")
 193: 
-194:     templates = db.listar_templates_ativos()
-195:     if not templates:
-196:         print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
-197:         db.close()
-198:         return
-199: 
-200:     mensagem = _escolher_template(templates)
-201: 
-202:     # Fora do horário permitido não dá para enviar (nem teste).
-203:     if not janela_aberta():
-204:         aviso_fora_da_janela()
-205:         db.close()
-206:         return
-207: 
-208:     # Teto diário: mostra o consumo e bloqueia quando esgotado.
-209:     enviados_hoje, restante_dia = resumo_limite_dia(db)
-210:     if restante_dia is not None:
-211:         print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} enviados. "
-212:               f"Restam {restante_dia}.")
-213:         if restante_dia <= 0:
-214:             print(f"Limite diário atingido. Os envios voltam na próxima janela "
-215:                   f"({descrever_janela()}).")
-216:             db.close()
-217:             return
+194: 
+195: def enviar_whatsapp_menu():
+196:     print("\n=== ENVIO WHATSAPP ===")
+197:     print(f"Provedor: {descrever_provedor()}")
+198: 
+199:     if not WAHA_ATIVO:
+200:         print("Envio de WhatsApp desativado (WAHA_ATIVO=false no .env).")
+201:         return
+202: 
+203:     # Para o provedor Meta o conteúdo vem do template aprovado, não do banco.
+204:     if provedor_atual() == "meta":
+205:         import src.meta_whatsapp as meta_whatsapp
+206:         if not meta_whatsapp.configurado():
+207:             print("Meta API não configurada. Defina META_ACCESS_TOKEN e "
+208:                   "META_PHONE_NUMBER_ID no .env.")
+209:             return
+210:         if not meta_whatsapp.template_configurado():
+211:             print("Nenhum template definido. Defina META_TEMPLATE_NOME no .env "
+212:                   "(ex.: mkt_01).")
+213:             return
+214: 
+215:     db = LeadDatabase()
+216: 
+217:     templates = db.listar_templates_ativos()
 218: 
-219:     numero_f, cidade_f, nicho_f = _escolher_filtros()
-220: 
-221:     # Busca todos os pendentes (sem limitar ainda) para mostrar o total disponível.
-222:     pendentes = db.get_leads_para_envio(numero=numero_f, cidade=cidade_f, nicho=nicho_f)
-223: 
-224:     if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
-225:         testar_envio(db, mensagem, pendentes=pendentes)
-226: 
-227:     if pendentes.empty:
-228:         print("Nenhum lead celular pendente de envio (com os filtros aplicados).")
-229:         db.close()
-230:         return
-231: 
-232:     total_disponivel = len(pendentes)
-233:     print(f"\n{total_disponivel} lead(s) celular(es) pendentes (fixos são ignorados).")
-234: 
-235:     # Quantidade (range): Enter = todos (respeitando os limites do .env).
-236:     padrao = total_disponivel
-237:     if WAHA_LIMITE:
-238:         print(f"Limite configurado no .env: {WAHA_LIMITE} lead(s) por campanha.")
-239:         padrao = min(padrao, WAHA_LIMITE)
-240:     if restante_dia is not None:
-241:         padrao = min(padrao, restante_dia)
-242: 
-243:     entrada = input(
-244:         f"Quantos leads enviar? (Enter = {padrao}): "
-245:     ).strip()
-246: 
-247:     if entrada:
-248:         if entrada.isdigit() and int(entrada) > 0:
-249:             quantidade = int(entrada)
-250:         else:
-251:             print("Valor inválido. Usando o padrão.")
-252:             quantidade = padrao
-253:     else:
-254:         quantidade = padrao
-255: 
-256:     if WAHA_LIMITE and quantidade > WAHA_LIMITE:
-257:         print(f"Ajustando para o limite do .env ({WAHA_LIMITE}).")
-258:         quantidade = WAHA_LIMITE
-259: 
-260:     if restante_dia is not None and quantidade > restante_dia:
-261:         print(f"Ajustando ao limite diário restante ({restante_dia}).")
-262:         quantidade = restante_dia
-263: 
-264:     quantidade = min(quantidade, total_disponivel)
-265:     pendentes = pendentes.head(quantidade)
-266: 
-267:     if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
-268:         print("Envio cancelado.")
-269:         db.close()
-270:         return
-271: 
-272:     disparar_campanha(
-273:         db,
-274:         mensagem_template=mensagem,
-275:         intervalo=WAHA_INTERVALO,
-276:         limite=quantidade,
-277:         leads=pendentes,
-278:     )
-279:     db.close()
-280: 
-281: 
-282: def aquecer_bairros_menu():
-283:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
-284:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
-285: 
-286:     if not LOCALIDADES_SALVAR:
-287:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
-288:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
-289:         return
+219:     if provedor_atual() == "meta":
+220:         # ⚠️ Com o provedor Meta o CONTEÚDO enviado ao lead é o template
+221:         # APROVADO na Meta (META_TEMPLATE_NOME). O `templates_whatsapp` do
+222:         # banco NÃO é enviado — serve só como texto descritivo no log
+223:         # (whatsapp_envios_log.mensagem).
+224:         #
+225:         # Por isso NÃO perguntamos qual template usar: a escolha não teria
+226:         # efeito no que o lead recebe. Usamos o primeiro como rótulo de log.
+227:         import src.meta_whatsapp as meta_whatsapp
+228: 
+229:         if templates:
+230:             mensagem = templates[0]["mensagem"]
+231:             print(f"\nTemplate enviado ao lead: '{meta_whatsapp.META_TEMPLATE_NOME}' "
+232:                   f"({meta_whatsapp.META_TEMPLATE_IDIOMA}) — aprovado na Meta.")
+233:             print(f"Texto de log   : '{templates[0]['descricao']}' "
+234:                   f"(templates_whatsapp) — NÃO é enviado ao lead.")
+235:         else:
+236:             mensagem = f"[template Meta: {meta_whatsapp.META_TEMPLATE_NOME}]"
+237:             print(f"\nTemplate enviado ao lead: '{meta_whatsapp.META_TEMPLATE_NOME}' "
+238:                   f"({meta_whatsapp.META_TEMPLATE_IDIOMA}) — aprovado na Meta.")
+239:             print("Nenhum template no banco local: o log registrará o nome do "
+240:                   "template da Meta.")
+241:     else:
+242:         if not templates:
+243:             print("Nenhum template ativo. Cadastre um template na tabela templates_whatsapp.")
+244:             db.close()
+245:             return
+246:         mensagem = _escolher_template(templates)
+247: 
+248:     # Fora do horário permitido não dá para enviar (nem teste).
+249:     if not janela_aberta():
+250:         aviso_fora_da_janela()
+251:         db.close()
+252:         return
+253: 
+254:     # Teto diário: mostra o consumo. Quando esgotado, PERGUNTA se quer
+255:     # continuar (execução manual). O teto existe para proteger o número de
+256:     # banimento por volume — então não é removido, só passa a ser explícito.
+257:     enviados_hoje, restante_dia = resumo_limite_dia(db)
+258:     ignorar_limite_dia = False
+259:     if restante_dia is not None:
+260:         print(f"Limite diário: {enviados_hoje}/{WAHA_LIMITE_DIA} enviados. "
+261:               f"Restam {restante_dia}.")
+262:         if restante_dia <= 0:
+263:             print(f"\nLimite diário atingido ({enviados_hoje}/{WAHA_LIMITE_DIA}).")
+264:             print("O teto diário existe para reduzir o risco de bloqueio do número.")
+265:             print("Continuar enviando hoje aumenta esse risco.")
+266:             if not _confirmar("Deseja continuar mesmo assim? (S/N): "):
+267:                 print(f"Envio cancelado. Os envios voltam automaticamente na "
+268:                       f"próxima janela ({descrever_janela()}).")
+269:                 db.close()
+270:                 return
+271:             ignorar_limite_dia = True
+272:             restante_dia = None
+273:             print("Prosseguindo SEM o teto diário (decisão manual).\n")
+274: 
+275:     numero_f, cidade_f, nicho_f = _escolher_filtros()
+276: 
+277:     # Busca todos os pendentes (sem limitar ainda) para mostrar o total disponível.
+278:     pendentes = db.get_leads_para_envio(numero=numero_f, cidade=cidade_f, nicho=nicho_f)
+279: 
+280:     if _confirmar("Deseja fazer um envio de teste antes? (S/N): "):
+281:         testar_envio(db, mensagem, pendentes=pendentes)
+282: 
+283:     if pendentes.empty:
+284:         print("Nenhum lead celular pendente de envio (com os filtros aplicados).")
+285:         db.close()
+286:         return
+287: 
+288:     total_disponivel = len(pendentes)
+289:     print(f"\n{total_disponivel} lead(s) celular(es) pendentes (fixos são ignorados).")
 290: 
-291:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
-292:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
-293: 
-294:     df_estados = obter_estados()
-295:     if df_estados.empty:
-296:         print("Não foi possível obter a lista de estados.")
-297:         return
+291:     # Quantidade (range): Enter = todos (respeitando os limites do .env).
+292:     padrao = total_disponivel
+293:     if WAHA_LIMITE:
+294:         print(f"Limite configurado no .env: {WAHA_LIMITE} lead(s) por campanha.")
+295:         padrao = min(padrao, WAHA_LIMITE)
+296:     if restante_dia is not None:
+297:         padrao = min(padrao, restante_dia)
 298: 
-299:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
-300:     if uf not in df_estados['uf'].values:
-301:         print("UF inválida.")
-302:         return
-303: 
-304:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
-305:     pendentes = listar_municipios_pendentes(uf)
-306:     if not pendentes:
-307:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
-308:         return
-309: 
-310:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
-311:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
-312:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
-313: 
-314:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
-315:     max_cidades = 0
-316:     if limite:
-317:         try:
-318:             max_cidades = max(1, int(limite))
-319:         except ValueError:
-320:             print("Valor inválido. Usando todas.")
-321:             max_cidades = 0
+299:     entrada = input(
+300:         f"Quantos leads enviar? (Enter = {padrao}): "
+301:     ).strip()
+302: 
+303:     if entrada:
+304:         if entrada.isdigit() and int(entrada) > 0:
+305:             quantidade = int(entrada)
+306:         else:
+307:             print("Valor inválido. Usando o padrão.")
+308:             quantidade = padrao
+309:     else:
+310:         quantidade = padrao
+311: 
+312:     if WAHA_LIMITE and quantidade > WAHA_LIMITE:
+313:         print(f"Ajustando para o limite do .env ({WAHA_LIMITE}).")
+314:         quantidade = WAHA_LIMITE
+315: 
+316:     if restante_dia is not None and quantidade > restante_dia:
+317:         print(f"Ajustando ao limite diário restante ({restante_dia}).")
+318:         quantidade = restante_dia
+319: 
+320:     quantidade = min(quantidade, total_disponivel)
+321:     pendentes = pendentes.head(quantidade)
 322: 
-323:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
-324:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
-325:     if confirmar != 'S':
-326:         print("Operação cancelada.")
-327:         return
-328: 
-329:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
-330: 
-331: 
-332: def menu_interativo():
-333:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
-334:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
-335:     so_enviar_cli = "--so-enviar" in sys.argv
-336: 
-337:     if SOMENTE_ENVIO or so_enviar_cli:
-338:         enviar_whatsapp_menu()
-339:         return
-340: 
-341:     while True:
-342:         print("\n=== MAP SCRAPER ===")
-343:         print("1 - Coletar leads")
-344:         print("2 - Enviar mensagens WhatsApp")
-345:         print("3 - Sincronizar base de localidades (IBGE)")
-346:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
-347:         print("5 - Sair")
-348:         opcao = input("Escolha uma opção: ").strip()
-349: 
-350:         if opcao == "1":
-351:             coletar_leads()
-352:         elif opcao == "2":
-353:             enviar_whatsapp_menu()
-354:         elif opcao == "3":
-355:             sincronizar_base_localidades()
-356:         elif opcao == "4":
-357:             aquecer_bairros_menu()
-358:         elif opcao == "5":
-359:             print("Até mais!")
-360:             break
-361:         else:
-362:             print("Opção inválida.")
-363: 
-364: 
-365: if __name__ == "__main__":
-366:     menu_interativo()
+323:     if not _confirmar(f"Enviar para {len(pendentes)} lead(s)? (S/N): "):
+324:         print("Envio cancelado.")
+325:         db.close()
+326:         return
+327: 
+328:     disparar_campanha(
+329:         db,
+330:         mensagem_template=mensagem,
+331:         intervalo=WAHA_INTERVALO,
+332:         limite=quantidade,
+333:         leads=pendentes,
+334:         ignorar_limite_dia=ignorar_limite_dia,
+335:     )
+336:     db.close()
+337: 
+338: 
+339: def aquecer_bairros_menu():
+340:     """Prepara o cache de bairros de uma UF inteira (sem raspar leads)."""
+341:     print("\n=== AQUECER BAIRROS DE UMA UF ===")
+342: 
+343:     if not LOCALIDADES_SALVAR:
+344:         print("LOCALIDADES_SALVAR=false: o aquecimento está desativado.")
+345:         print("Ative a flag LOCALIDADES_SALVAR no .env para gravar os bairros.")
+346:         return
+347: 
+348:     print("Resolve e grava os bairros de todas as cidades da UF, uma única vez.")
+349:     print("Depois disso a coleta por cidade não consulta mais IBGE/OSM.")
+350: 
+351:     df_estados = obter_estados()
+352:     if df_estados.empty:
+353:         print("Não foi possível obter a lista de estados.")
+354:         return
+355: 
+356:     uf = input("Digite a UF (ex: RS, SP, RJ): ").strip().upper()
+357:     if uf not in df_estados['uf'].values:
+358:         print("UF inválida.")
+359:         return
+360: 
+361:     print(f"\nVerificando quais cidades de {uf} ainda precisam de bairros...")
+362:     pendentes = listar_municipios_pendentes(uf)
+363:     if not pendentes:
+364:         print(f"Todas as cidades de {uf} já estão na base local. Nada a fazer.")
+365:         return
+366: 
+367:     print(f"{len(pendentes)} cidade(s) pendente(s) em {uf}.")
+368:     print("As cidades cobertas pelo IBGE são instantâneas; as demais usam o")
+369:     print("OpenStreetMap (Nominatim + Overpass), com pausa entre elas.")
+370: 
+371:     limite = input("Quantas cidades processar agora? (Enter = todas): ").strip()
+372:     max_cidades = 0
+373:     if limite:
+374:         try:
+375:             max_cidades = max(1, int(limite))
+376:         except ValueError:
+377:             print("Valor inválido. Usando todas.")
+378:             max_cidades = 0
+379: 
+380:     previstas = min(max_cidades, len(pendentes)) if max_cidades else len(pendentes)
+381:     confirmar = input(f"Processar {previstas} cidade(s)? (S/N): ").strip().upper()
+382:     if confirmar != 'S':
+383:         print("Operação cancelada.")
+384:         return
+385: 
+386:     aquecer_bairros_uf(uf, cidades=pendentes, max_cidades=max_cidades)
+387: 
+388: 
+389: def menu_interativo():
+390:     # Flag de linha de comando: `python src/main.py --so-enviar` pula a coleta
+391:     # e vai direto para o envio (equivale a SOMENTE_ENVIO=true no .env).
+392:     so_enviar_cli = "--so-enviar" in sys.argv
+393: 
+394:     if SOMENTE_ENVIO or so_enviar_cli:
+395:         enviar_whatsapp_menu()
+396:         return
+397: 
+398:     while True:
+399:         print("\n=== MAP SCRAPER ===")
+400:         print("1 - Coletar leads")
+401:         print("2 - Enviar mensagens WhatsApp")
+402:         print("3 - Sincronizar base de localidades (IBGE)")
+403:         print("4 - Aquecer bairros de uma UF (OpenStreetMap)")
+404:         print("5 - Sair")
+405:         opcao = input("Escolha uma opção: ").strip()
+406: 
+407:         if opcao == "1":
+408:             coletar_leads()
+409:         elif opcao == "2":
+410:             enviar_whatsapp_menu()
+411:         elif opcao == "3":
+412:             sincronizar_base_localidades()
+413:         elif opcao == "4":
+414:             aquecer_bairros_menu()
+415:         elif opcao == "5":
+416:             print("Até mais!")
+417:             break
+418:         else:
+419:             print("Opção inválida.")
+420: 
+421: 
+422: if __name__ == "__main__":
+423:     menu_interativo()
 ````
 
 ## File: README.md
@@ -5069,19 +6081,6 @@ requirements.txt
 # Git Diffs
 ## Git Diffs Working Tree
 ````diff
-diff --git a/README.md b/README.md
-index acfb2dc..f592f7e 100644
---- a/README.md
-+++ b/README.md
-@@ -542,4 +542,5 @@ Documentação do Projeto: MAP SCRAPER
- 
-     Se a tabela ainda não existir no banco (imagem antiga), rode
-     `python src/schema.py` ou `docker compose exec app python src/schema.py`.
--    Ela também é criada sozinha na primeira cidade coletada.
-\ No newline at end of file
-+    Ela também é criada sozinha na primeira cidade coletada.
-+    
-\ No newline at end of file
 
 ````
 
